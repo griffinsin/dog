@@ -1,0 +1,35 @@
+# IDE 相关文件
+.idea/
+.vscode/
+*.sublime-*
+*.swp
+*.swo
+.DS_Store
+
+# 编译和构建目录
+dist/
+build/
+target/
+out/
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# 依赖目录
+node_modules/
+vendor/
+
+# 其他
+*.bak
+*.cache
+*.env
+*.local
