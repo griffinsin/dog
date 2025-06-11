@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 全局变量
-DOG_VERSION="1.0.2"
+DOG_VERSION="1.0.3"
 
 # 全局函数
 dog_log() {
