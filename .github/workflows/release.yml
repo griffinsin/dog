@@ -1,0 +1,59 @@
+name: Release Homebrew Formula
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: 获取版本号
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+
+      - name: 创建发布包
+        run: |
+          mkdir -p dist
+          tar -czf dist/v${{ env.VERSION }}.tar.gz --exclude='.git' --exclude='.github' --exclude='dist' .
+          echo "TARBALL=v${{ env.VERSION }}.tar.gz" >> $GITHUB_ENV
+          echo "SHA=$(shasum -a 256 dist/v${{ env.VERSION }}.tar.gz | awk '{print $1}')" >> $GITHUB_ENV
+
+      - name: 创建 GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/${{ env.TARBALL }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 检出 Homebrew Tap 仓库
+        uses: actions/checkout@v3
+        with:
+          repository: griffinsin/homebrew-dog
+          path: homebrew-dog
+          token: ${{ secrets.TAP_REPO_TOKEN }}
+
+      - name: 更新 Formula
+        run: |
+          cd homebrew-dog
+          sed -i "s/version \".*\"/version \"${{ env.VERSION }}\"/" Formula/dog.rb
+          sed -i "s|url \".*\"|url \"https://github.com/griffinsin/dog/archive/refs/tags/v${{ env.VERSION }}.tar.gz\"|" Formula/dog.rb
+          sed -i "s/sha256 \".*\"/sha256 \"${{ env.SHA }}\"/" Formula/dog.rb
+
+      - name: 提交更新的 Formula
+        run: |
+          cd homebrew-dog
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add Formula/dog.rb
+          git commit -m "更新 dog 到 v${{ env.VERSION }}"
+          git push

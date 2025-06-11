@@ -1,0 +1,35 @@
+#!/bin/bash
+
+# 加载全局变量和函数
+source $(dirname "$(dirname "${BASH_SOURCE[0]}")")/lib/globals.sh
+
+# 命令目录
+COMMANDS_DIR=$(dirname "${BASH_SOURCE[0]}")/commands
+
+# 显示版本信息
+if [[ "$1" == "-v" || "$1" == "--version" ]]; then
+  echo "dog 工具 - 版本 1.0.0"
+  exit 0
+fi
+
+# 显示帮助信息
+if [[ "$1" == "-h" || "$1" == "--help" || -z "$1" ]]; then
+  echo "用法: dog <命令> [参数...]"
+  echo "可用命令:"
+  for cmd in $(ls ${COMMANDS_DIR}/*.sh 2>/dev/null | xargs -n1 basename | sed 's/\.sh$//')
+  do
+    echo "  $cmd"
+  done
+  exit 0
+fi
+
+# 检查命令是否存在
+if [[ ! -f "${COMMANDS_DIR}/$1.sh" ]]; then
+  echo "错误: 未知命令 '$1'"
+  echo "运行 'dog --help' 查看可用命令"
+  exit 1
+fi
+
+# 执行命令
+shift
+source "${COMMANDS_DIR}/$1.sh" "$@"
