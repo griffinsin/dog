@@ -31,5 +31,6 @@ if [[ ! -f "${COMMANDS_DIR}/$1.sh" ]]; then
 fi
 
 # 执行命令
+CMD=$1
 shift
-source "${COMMANDS_DIR}/$1.sh" "$@"
+source "${COMMANDS_DIR}/$CMD.sh" "$@"
