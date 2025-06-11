@@ -1,21 +1,21 @@
 #!/bin/bash
 
-# 加载全局变量和函数
+# Load global variables and functions
 source $(dirname "$(dirname "${BASH_SOURCE[0]}")")/lib/globals.sh
 
-# 命令目录
+# Commands directory
 COMMANDS_DIR=$(dirname "${BASH_SOURCE[0]}")/commands
 
-# 显示版本信息
+# Display version information
 if [[ "$1" == "-v" || "$1" == "--version" ]]; then
-  echo "dog 工具 - version 1.0.9"
+  echo "dog tool - version 1.0.9"
   exit 0
 fi
 
-# 显示帮助信息
+# Display help information
 if [[ "$1" == "-h" || "$1" == "--help" || -z "$1" ]]; then
-  echo "用法: dog <命令> [参数...]"
-  echo "可用命令:"
+  echo "Usage: dog <command> [arguments...]"
+  echo "Available commands:"
   for cmd in $(ls ${COMMANDS_DIR}/*.sh 2>/dev/null | xargs -n1 basename | sed 's/\.sh$//')
   do
     echo "  $cmd"
@@ -23,14 +23,14 @@ if [[ "$1" == "-h" || "$1" == "--help" || -z "$1" ]]; then
   exit 0
 fi
 
-# 检查命令是否存在
+# Check if command exists
 if [[ ! -f "${COMMANDS_DIR}/$1.sh" ]]; then
-  echo "错误: 未知命令 '$1'"
-  echo "运行 'dog --help' 查看可用命令"
+  echo "Error: Unknown command '$1'"
+  echo "Run 'dog --help' to see available commands"
   exit 1
 fi
 
-# 执行命令
+# Execute command
 CMD=$1
 shift
 source "${COMMANDS_DIR}/$CMD.sh" "$@"

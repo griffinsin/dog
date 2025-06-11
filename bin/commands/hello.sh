@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# 加载全局变量和函数
+# Load global variables and functions
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 
-# hello 命令实现
-dog_log "你好，世界！"
-dog_success "hello 命令执行成功"
+# hello command implementation
+dog_log "Hello, World!"
+dog_success "hello command executed successfully"
