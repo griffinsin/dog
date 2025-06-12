@@ -6,18 +6,28 @@ source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 # 文件查找命令实现
 dog_log "开始查找文件..."
 
-# 检查是否有 -c 参数（区分大小写）
+# 初始化变量
 case_sensitive=false
-if [ "$1" = "-c" ]; then
-    case_sensitive=true
-    shift
-    dog_log "启用区分大小写搜索"
-fi
+search_term=""
 
-search_term="$1"
+# 处理所有参数
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -c)
+            case_sensitive=true
+            dog_log "启用区分大小写搜索"
+            shift
+            ;;
+        *)
+            search_term="$1"
+            shift
+            ;;
+    esac
+done
 
+# 检查是否提供了搜索词
 if [ -z "$search_term" ]; then
-    dog_error "用法: dog find [-c] <搜索词>"
+    dog_error "用法: dog find [-c] <搜索词> 或 dog find <搜索词> [-c]"
     dog_error "  -c: 区分大小写搜索（默认不区分大小写）"
     exit 1
 fi
