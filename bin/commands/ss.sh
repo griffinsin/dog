@@ -35,12 +35,9 @@ fi
 if ! command -v adb &> /dev/null; then
     dog_error "adb 未安装，正在尝试安装..."
     
-    # 获取命令目录
-    COMMANDS_DIR=$(dirname "${BASH_SOURCE[0]}")
-    
-    # 调用 installadb 命令
-    dog_log "执行 installadb 命令..."
-    source "${COMMANDS_DIR}/installadb.sh"
+    # 直接使用 brew 安装 adb
+    dog_log "执行: brew install --cask android-platform-tools"
+    brew install --cask android-platform-tools
     
     # 再次检查 adb 是否已安装
     if ! command -v adb &> /dev/null; then
