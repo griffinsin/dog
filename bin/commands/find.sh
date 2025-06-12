@@ -4,8 +4,6 @@
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 
 # 文件查找命令实现
-dog_log "开始查找文件..."
-
 # 初始化变量
 case_sensitive=false
 search_term=""
@@ -15,7 +13,6 @@ while [ $# -gt 0 ]; do
     case "$1" in
         -c)
             case_sensitive=true
-            dog_log "启用区分大小写搜索"
             shift
             ;;
         *)
