@@ -21,10 +21,9 @@ jobs:
       - name: 创建发布包
         run: |
           mkdir -p dist
-          # 使用 git archive 命令创建标准格式的发布包，与 GitHub 提供的下载格式一致
+          # 使用 git archive 命令创建标准格式的发布包
           git archive --format=tar.gz --prefix=dog-${{ env.VERSION }}/ v${{ env.VERSION }} > dist/v${{ env.VERSION }}.tar.gz
           echo "TARBALL=v${{ env.VERSION }}.tar.gz" >> $GITHUB_ENV
-          echo "SHA=$(shasum -a 256 dist/v${{ env.VERSION }}.tar.gz | awk '{print $1}')" >> $GITHUB_ENV
 
       - name: 创建 GitHub Release
         id: create_release
@@ -35,6 +34,19 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      # 等待几秒，确保 GitHub Release 已经创建完成
+      - name: 等待 Release 创建完成
+        run: sleep 10
+          
+      # 下载 GitHub 创建的发布包并计算 SHA256 校验和
+      - name: 下载发布包并计算 SHA256
+        run: |
+          # 下载 GitHub 创建的发布包
+          curl -L -o github_release.tar.gz https://github.com/griffinsin/dog/archive/refs/tags/v${{ env.VERSION }}.tar.gz
+          # 计算 SHA256 校验和
+          echo "SHA=$(shasum -a 256 github_release.tar.gz | awk '{print $1}')" >> $GITHUB_ENV
+          echo "Downloaded tarball SHA256: $(shasum -a 256 github_release.tar.gz | awk '{print $1}')"
 
       - name: 检出 Homebrew Tap 仓库
         uses: actions/checkout@v3
