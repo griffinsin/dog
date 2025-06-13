@@ -24,7 +24,7 @@ dog_log "仓库名称: $REPO_NAME"
 
 # 列出 ~/.ssh 目录下所有的私钥文件
 dog_log "可用的 SSH 密钥文件:"
-key_files=$(find ~/.ssh -type f ! -name "*.pub" ! -name "config" ! -name "known_hosts")
+key_files=$(find ~/.ssh -type f ! -name "*.pub" ! -name "config" ! -name "known_hosts" ! -name ".DS_Store" ! -name "*.old")
 
 # 检查是否找到了任何 SSH 密钥
 if [ -z "$key_files" ]; then

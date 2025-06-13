@@ -12,7 +12,7 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
 
     # 列出~/.ssh目录下所有的私钥文件
     dog_log "可用的SSH密钥文件："
-    key_files=$(find ~/.ssh -type f ! -name "*.pub" ! -name "config" ! -name "known_hosts")
+    key_files=$(find ~/.ssh -type f ! -name "*.pub" ! -name "config" ! -name "known_hosts" ! -name ".DS_Store" ! -name "*.old")
     select key_path in $key_files; do
         if [ -n "$key_path" ]; then
             # 设置选定的SSH密钥
