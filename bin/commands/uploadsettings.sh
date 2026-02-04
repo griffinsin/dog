@@ -66,9 +66,16 @@ for app in "${jetbrains_apps[@]}"; do
                     if [ -n "$(git status --porcelain)" ]; then
                         git add .
                         git commit -m "更新 $sub_dir 从 $app"
-                        git push origin main
-                        print_color "$GREEN" "$app 的 $sub_dir 更改已成功上传。"
-                        exit 0 # 成功提交后退出函数
+                        if git push origin main; then
+                            print_color "$GREEN" "$app 的 $sub_dir 更改已成功上传。"
+                            exit 0 # 成功提交后退出函数
+                        else
+                            dog_error "推送失败，可能的解决方案："
+                            echo "  当前仓库位置: $repo_dir"
+                            echo "  dog ssh    - 生成新的 SSH 密钥"
+                            echo "  dog setssh - 为当前仓库设置 SSH 密钥"
+                            exit 1
+                        fi
                     else
                         print_color "$GREEN" "$app 的 $sub_dir 没有需要提交的更改。"
                     fi
