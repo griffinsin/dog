@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Description: 生成 SSH 密钥并配置 GitHub 连接
+
 # Load global variables and functions
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 

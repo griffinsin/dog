@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Description: 战网安装卡死问题解决
+
 # 加载全局变量和函数
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 

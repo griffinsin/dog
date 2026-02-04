@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Description: 导入开发环境快捷键和代码片段
+
 # 加载全局变量和函数
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 

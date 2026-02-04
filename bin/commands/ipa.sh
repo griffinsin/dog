@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Description: iOS 应用包管理和安装工具 指南
+
 # 加载全局变量和函数
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 

@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Description: PyCharm 打开当前文件夹
+
 # 加载全局变量和函数
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 

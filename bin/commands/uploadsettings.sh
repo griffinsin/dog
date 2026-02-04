@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Description: 上传开发环境设置到云端
+
 # 加载全局变量和函数
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 

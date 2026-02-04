@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Description: 文件查找
+
 # Load global variables and functions
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 

@@ -16,9 +16,18 @@ fi
 if [[ "$1" == "-h" || "$1" == "--help" || -z "$1" ]]; then
   echo "Usage: dog <command> [arguments...]"
   echo "Available commands:"
-  for cmd in $(ls ${COMMANDS_DIR}/*.sh 2>/dev/null | xargs -n1 basename | sed 's/\.sh$//')
-  do
-    echo "  $cmd"
+  echo ""
+  
+  # Get commands and their descriptions
+  for cmd_file in ${COMMANDS_DIR}/*.sh; do
+    if [ -f "$cmd_file" ]; then
+      cmd_name=$(basename "$cmd_file" .sh)
+      description=$(grep "^# Description:" "$cmd_file" | sed 's/^# Description: //' | head -1)
+      if [ -z "$description" ]; then
+        description="无描述"
+      fi
+      printf "  %-14s %s\n" "$cmd_name" "$description"
+    fi
   done
   exit 0
 fi

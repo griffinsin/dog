@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Description: JetBrains 产品激活和配置工具
+
 # Load global variables and functions
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 

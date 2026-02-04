@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Description: 打开 Application Support/Google
+
 # Load global variables and functions
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 
