@@ -6,6 +6,33 @@
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 
 # uploadsettings 命令实现
+# 
+# 重要设计说明：
+# 
+# 配置共享机制：
+# - JetBrains IDEs (PyCharm, GoLand, IntelliJ IDEA 等) 和 Android Studio 的 keymaps 和 templates 配置是完全通用的
+# - 所有这些应用共享同一份配置文件，不需要为每个应用单独维护
+# - 这就是为什么代码中使用 rm -rf 清空目标目录，然后重新复制 - 确保云端配置与本地完全一致
+# 
+# 早期退出逻辑：
+# - 因为所有 IDE 共享同一份配置，只需要同步一次即可
+# - 一旦检测到第一个有更改的 IDE 就提交并退出，避免重复提交相同的配置
+# - 这符合实际使用场景：用户通常只在某一个 IDE 中修改配置，然后同步到所有其他 IDE
+# 
+# 优先级设计：
+# - JetBrains IDEs > Android Studio > Xcode CodeSnippets
+# - JetBrains IDEs 优先级最高，因为是最常用的开发工具
+# - Android Studio 基于 JetBrains，配置完全兼容
+# - Xcode CodeSnippets 是独立的配置，最后处理
+# 
+# 使用场景：
+# 1. 用户在任意一个 JetBrains IDE 或 Android Studio 中修改了 keymaps 或 templates
+# 2. 运行 dog uploadsettings 命令
+# 3. 脚本检测到第一个有更改的 IDE，将其配置同步到云端仓库
+# 4. 其他设备或其他 IDE 通过 dog importsettings 获取最新配置
+# 
+# 注意：这不是配置备份工具，而是配置同步工具，目标是保持所有 IDE 配置的一致性
+
 dog_log "开始上传开发环境设置..."
 
 # 设置仓库目录
