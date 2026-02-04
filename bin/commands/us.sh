@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Description: 上传开发环境设置到云端
+# Description: 上传开发环境设置到云端 (uploadsettings的简写)
 
 # 加载全局变量和函数
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 
-# uploadsettings 命令实现
+# us 命令实现
 # 
 # 重要设计说明：
 # 
@@ -41,7 +41,7 @@ dog_log "同步设置从 JetBrains IDEs 到 $repo_dir..."
 
 # 检查仓库目录是否存在
 if [ ! -d "$repo_dir" ]; then
-    dog_error "$repo_dir 目录不存在，请先运行 'dog importsettings' 命令初始化仓库"
+    dog_error "$repo_dir 目录不存在，请先运行 'dog is' 命令初始化仓库"
     exit 1
 fi
 
