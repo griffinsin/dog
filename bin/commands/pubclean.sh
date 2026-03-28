@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Description: flutter pub clean
+
 # Load global variables and functions
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 

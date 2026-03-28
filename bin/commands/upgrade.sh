@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Description: dog升级版本
+
 # Load global variables and functions
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 

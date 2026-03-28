@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Description: 导入开发环境快捷键和代码片段 (importsettings的简写)
+
 # 加载全局变量和函数
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 
@@ -39,7 +41,7 @@ for app in "${jetbrains_apps[@]}"; do
             mkdir -p "$config_dir/templates"
             cp -r "$HOME/.mace/dev_settings/keymaps"/* "$config_dir/keymaps" 2>/dev/null || true
             cp -r "$HOME/.mace/dev_settings/templates"/* "$config_dir/templates" 2>/dev/null || true
-            print_color "$GREEN" "设置已复制到 $app。"
+            print_color_with_var "$GREEN" "设置已复制到" "$app"
         fi
     done
 done

@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Description: 重置 Git 仓库，删除历史记录并重新初始化
+
 # 加载全局变量和函数
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 
