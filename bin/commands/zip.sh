@@ -13,33 +13,58 @@ usage() {
 TARGET_DIR="."
 BATCH_SIZE=20
 
-while getopts ":p:n:h" opt; do
-    case "$opt" in
-        p)
-            TARGET_DIR="$OPTARG"
+PREFIX=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -p)
+            shift
+            if [ -z "$1" ]; then
+                dog_error "Option -p requires an argument."
+                usage
+                exit 1
+            fi
+            TARGET_DIR="$1"
+            shift
             ;;
-        n)
-            BATCH_SIZE="$OPTARG"
+        -n)
+            shift
+            if [ -z "$1" ]; then
+                dog_error "Option -n requires an argument."
+                usage
+                exit 1
+            fi
+            BATCH_SIZE="$1"
+            shift
             ;;
-        h)
+        -h|--help)
             usage
             exit 0
             ;;
-        :) 
-            dog_error "Option -$OPTARG requires an argument."
+        --)
+            shift
+            break
+            ;;
+        -* )
+            dog_error "Unknown option: $1"
             usage
             exit 1
             ;;
-        \?)
-            dog_error "Unknown option: -$OPTARG"
-            usage
-            exit 1
+        *)
+            if [ -z "$PREFIX" ]; then
+                PREFIX="$1"
+                shift
+            else
+                dog_error "Unexpected extra argument: $1"
+                usage
+                exit 1
+            fi
             ;;
     esac
 done
-shift $((OPTIND - 1))
 
-PREFIX="$1"
+if [ -z "$PREFIX" ] && [ $# -gt 0 ]; then
+    PREFIX="$1"
+fi
 if [ -z "$PREFIX" ]; then
     dog_error "Missing required prefix argument."
     usage
