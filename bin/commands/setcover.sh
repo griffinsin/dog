@@ -8,23 +8,43 @@ source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 usage() {
     echo "用法: dog setcover <音视频文件路径> <图片文件路径>"
     echo "  两个参数可任意顺序传入，命令会自动识别图片与音视频文件。"
+    echo "  -v  显示详细日志"
     echo "  支持的图片格式: jpg, jpeg, png, webp"
     echo "  支持的音视频格式: m4a, mp4, m4v, mov, mp3"
 }
 
-if [[ "$1" == "-h" || "$1" == "--help" ]]; then
-    usage
-    exit 0
-fi
+VERBOSE=false
+ARGS=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        -v)
+            VERBOSE=true
+            shift
+            ;;
+        -* )
+            dog_error "未知参数: $1"
+            usage
+            exit 1
+            ;;
+        *)
+            ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
 
-if [ $# -ne 2 ]; then
-    dog_error "需要且仅需要 2 个参数。"
+if [ ${#ARGS[@]} -ne 2 ]; then
+    dog_error "需要 2 个文件路径参数。"
     usage
     exit 1
 fi
 
-A="$1"
-B="$2"
+A="${ARGS[0]}"
+B="${ARGS[1]}"
 
 if [ ! -f "$A" ]; then
     dog_error "文件不存在: $A"
@@ -41,6 +61,12 @@ if ! command -v ffmpeg >/dev/null 2>&1; then
     dog_log "安装: brew install ffmpeg"
     exit 1
 fi
+
+vlog() {
+    if [ "$VERBOSE" = true ]; then
+        dog_log "$1"
+    fi
+}
 
 lower_ext() {
     local name="$1"
@@ -79,8 +105,10 @@ elif is_image_ext "$B_EXT" && is_media_ext "$A_EXT"; then
     MEDIA_EXT="$A_EXT"
 else
     dog_error "文件格式不支持，或无法判断哪个是音视频文件、哪个是图片文件。"
-    dog_log "参数1: $A (.$A_EXT)"
-    dog_log "参数2: $B (.$B_EXT)"
+    if [ "$VERBOSE" = true ]; then
+        dog_log "参数1: $A (.$A_EXT)"
+        dog_log "参数2: $B (.$B_EXT)"
+    fi
     usage
     exit 1
 fi
@@ -95,37 +123,65 @@ if [ -e "$TMP_OUT" ]; then
     rm -f "$TMP_OUT"
 fi
 
-dog_log "音视频文件: $MEDIA_PATH"
-dog_log "图片文件: $IMAGE_PATH"
-
-dog_log "正在写入封面..."
+vlog "音视频文件: $MEDIA_PATH"
+vlog "图片文件: $IMAGE_PATH"
+vlog "正在写入封面..."
 
 if [[ "$MEDIA_EXT" == "mp3" ]]; then
-    ffmpeg -y \
-        -i "$MEDIA_PATH" \
-        -i "$IMAGE_PATH" \
-        -map 0:a \
-        -map 1:v \
-        -c copy \
-        -id3v2_version 3 \
-        -metadata:s:v title="Album cover" \
-        -metadata:s:v comment="Cover (front)" \
+    FFMPEG_ARGS=(
+        -y
+        -i "$MEDIA_PATH"
+        -i "$IMAGE_PATH"
+        -map 0:a
+        -map 1:v
+        -c copy
+        -id3v2_version 3
+        -metadata:s:v title="Album cover"
+        -metadata:s:v comment="Cover (front)"
         "$TMP_OUT"
+    )
 else
-    ffmpeg -y \
-        -i "$MEDIA_PATH" \
-        -i "$IMAGE_PATH" \
-        -map 0 \
-        -map 1 \
-        -c copy \
-        -disposition:v attached_pic \
+    FFMPEG_ARGS=(
+        -y
+        -i "$MEDIA_PATH"
+        -i "$IMAGE_PATH"
+        -map 0
+        -map 1
+        -c copy
+        -disposition:v attached_pic
         "$TMP_OUT"
+    )
 fi
 
-if [ $? -ne 0 ]; then
-    dog_error "ffmpeg 执行失败。"
+FFMPEG_LOG_FILE=""
+if [ "$VERBOSE" = true ]; then
+    ffmpeg "${FFMPEG_ARGS[@]}"
+    FFMPEG_RC=$?
+else
+    FFMPEG_LOG_FILE=$(mktemp)
+    ffmpeg -hide_banner -loglevel error -nostats "${FFMPEG_ARGS[@]}" 2>"$FFMPEG_LOG_FILE"
+    FFMPEG_RC=$?
+fi
+
+if [ $FFMPEG_RC -ne 0 ]; then
+    if [ "$VERBOSE" = true ]; then
+        dog_error "封面设置失败（ffmpeg 执行失败）。"
+    else
+        reason=$(tail -n 1 "$FFMPEG_LOG_FILE" 2>/dev/null)
+        if [ -z "$reason" ]; then
+            reason="ffmpeg 执行失败"
+        fi
+        dog_error "封面设置失败: $reason"
+    fi
     rm -f "$TMP_OUT" 2>/dev/null || true
+    if [ -n "$FFMPEG_LOG_FILE" ]; then
+        rm -f "$FFMPEG_LOG_FILE" 2>/dev/null || true
+    fi
     exit 1
+fi
+
+if [ -n "$FFMPEG_LOG_FILE" ]; then
+    rm -f "$FFMPEG_LOG_FILE" 2>/dev/null || true
 fi
 
 mv -f "$TMP_OUT" "$MEDIA_PATH"
