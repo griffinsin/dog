@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Description: 按指定数量分批打包当前目录文件为多个 zip
+
 # Load global variables and functions
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 
