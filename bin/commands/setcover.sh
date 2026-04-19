@@ -74,14 +74,6 @@ vlog() {
     fi
 }
 
-COVER_TMP_IMAGE=""
-cleanup() {
-    if [ -n "$COVER_TMP_IMAGE" ] && [ -f "$COVER_TMP_IMAGE" ]; then
-        rm -f "$COVER_TMP_IMAGE" 2>/dev/null || true
-    fi
-}
-trap cleanup EXIT
-
 lower_ext() {
     local name="$1"
     local ext="${name##*.}"
@@ -134,18 +126,19 @@ if [ "$NO_COMPRESS" = false ]; then
     if [[ "$IMAGE_EXT" == "png" || "$IMAGE_EXT" == "webp" ]]; then
         vlog "检测到图片格式为 .$IMAGE_EXT，默认将转为 JPEG（质量 75，不改宽高）"
 
-        tmp_base=$(mktemp -t dog_setcover_cover)
-        rm -f "$tmp_base" 2>/dev/null || true
-        COVER_TMP_IMAGE="${tmp_base}.jpg"
+        IMAGE_DIR=$(dirname "$IMAGE_PATH")
+        IMAGE_BASE=$(basename "$IMAGE_PATH")
+        IMAGE_NAME_NOEXT="${IMAGE_BASE%.*}"
+        COVER_JPG_PATH="${IMAGE_DIR}/${IMAGE_NAME_NOEXT}.jpg"
 
         if command -v sips >/dev/null 2>&1; then
             if [ "$VERBOSE" = true ]; then
-                sips -s format jpeg -s formatOptions 75 "$IMAGE_PATH" --out "$COVER_TMP_IMAGE" >/dev/null
+                sips -s format jpeg -s formatOptions 75 "$IMAGE_PATH" --out "$COVER_JPG_PATH" >/dev/null
             else
-                sips -s format jpeg -s formatOptions 75 "$IMAGE_PATH" --out "$COVER_TMP_IMAGE" >/dev/null 2>&1
+                sips -s format jpeg -s formatOptions 75 "$IMAGE_PATH" --out "$COVER_JPG_PATH" >/dev/null 2>&1
             fi
 
-            if [ $? -ne 0 ] || [ ! -f "$COVER_TMP_IMAGE" ]; then
+            if [ $? -ne 0 ] || [ ! -f "$COVER_JPG_PATH" ]; then
                 dog_error "封面图片压缩失败（sips 转换失败）。"
                 exit 1
             fi
@@ -153,18 +146,18 @@ if [ "$NO_COMPRESS" = false ]; then
             # Fallback: use ffmpeg to convert. Quality scale is not the same as JPEG percent;
             # use a reasonable default that typically yields small size.
             if [ "$VERBOSE" = true ]; then
-                ffmpeg -y -hide_banner -loglevel warning -i "$IMAGE_PATH" -q:v 5 "$COVER_TMP_IMAGE"
+                ffmpeg -y -hide_banner -loglevel warning -i "$IMAGE_PATH" -q:v 5 "$COVER_JPG_PATH"
             else
-                ffmpeg -y -hide_banner -loglevel error -nostats -i "$IMAGE_PATH" -q:v 5 "$COVER_TMP_IMAGE" >/dev/null 2>&1
+                ffmpeg -y -hide_banner -loglevel error -nostats -i "$IMAGE_PATH" -q:v 5 "$COVER_JPG_PATH" >/dev/null 2>&1
             fi
 
-            if [ $? -ne 0 ] || [ ! -f "$COVER_TMP_IMAGE" ]; then
+            if [ $? -ne 0 ] || [ ! -f "$COVER_JPG_PATH" ]; then
                 dog_error "封面图片压缩失败（ffmpeg 转换失败）。"
                 exit 1
             fi
         fi
 
-        COVER_IMAGE_PATH="$COVER_TMP_IMAGE"
+        COVER_IMAGE_PATH="$COVER_JPG_PATH"
     fi
 else
     vlog "已指定 --no-compress，将直接使用原图作为封面"
