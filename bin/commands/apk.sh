@@ -12,6 +12,10 @@ usage() {
     echo "  -d              允许版本降级安装"
     echo "  -g              安装后授予运行时权限"
     echo "  -h, --help      显示帮助信息"
+    echo ""
+    echo "说明:"
+    echo "  默认使用 adb install -r 覆盖安装"
+    echo "  多台设备连接时会提示选择设备"
 }
 
 selected_device=""

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Description: 发送文件或目录到安卓手机
+# Description: 发送文件或目录到安卓手机并尝试打开
 
 # 加载全局变量和函数
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
@@ -11,6 +11,12 @@ usage() {
     echo "  -d <remote_dir>   指定手机目标目录，默认 /sdcard/Download/"
     echo "  --no-open         发送后不自动打开文件"
     echo "  -h, --help        显示帮助信息"
+    echo ""
+    echo "说明:"
+    echo "  默认发送到 /sdcard/Download/"
+    echo "  发送单个文件后会尝试在手机上打开"
+    echo "  发送目录时只发送，不自动打开"
+    echo "  多台设备连接时会提示选择设备"
 }
 
 selected_device=""

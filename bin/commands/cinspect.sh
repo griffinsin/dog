@@ -10,6 +10,11 @@ usage() {
     echo "  -s <serial>   指定要调试的 adb 设备序列号（用于提示确认）"
     echo "  --no-open     只显示提示，不自动打开 Chrome"
     echo "  -h, --help    显示帮助信息"
+    echo ""
+    echo "说明:"
+    echo "  打开 chrome://inspect/#devices"
+    echo "  多台设备连接时会提示选择目标设备序列号"
+    echo "  Chrome 页面仍需手动点击对应网页的 inspect"
 }
 
 open_chrome=true

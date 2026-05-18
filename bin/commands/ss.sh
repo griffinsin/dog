@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Description: 安卓手机截屏
+# Description: 安卓手机截屏并保存到电脑
 
 # 加载全局变量和函数
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
@@ -10,6 +10,11 @@ usage() {
     echo "  -t              使用时间戳文件名"
     echo "  -s <serial>     指定 adb 设备序列号"
     echo "  -h, --help      显示帮助信息"
+    echo ""
+    echo "说明:"
+    echo "  默认保存到 ~/Downloads/screenshot.png"
+    echo "  截屏成功后会在 Finder 中打开并选中截图文件"
+    echo "  多台设备连接时会提示选择设备"
 }
 
 # 初始化变量
