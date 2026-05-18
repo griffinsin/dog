@@ -6,10 +6,10 @@
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 
 usage() {
-    echo "Usage: dog zip [-p path] [-n count] <prefix>"
+    echo "Usage: dog zip [-p path] [-n count] [prefix]"
     echo "  -p    Target directory path (default: current directory)"
     echo "  -n    Number of files per zip (default: 20)"
-    echo "  prefix  Required zip filename prefix"
+    echo "  prefix  Zip filename prefix (default: target directory name)"
 }
 
 TARGET_DIR="."
@@ -20,7 +20,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         -p)
             shift
-            if [ -z "$1" ]; then
+            if [ -z "$1" ] || [[ "$1" == -* ]]; then
                 dog_error "Option -p requires an argument."
                 usage
                 exit 1
@@ -30,8 +30,13 @@ while [ $# -gt 0 ]; do
             ;;
         -n)
             shift
-            if [ -z "$1" ]; then
+            if [ -z "$1" ] || [[ "$1" == -* ]]; then
                 dog_error "Option -n requires an argument."
+                usage
+                exit 1
+            fi
+            if ! [[ "$1" =~ ^[0-9]+$ ]] || [ "$1" -le 0 ]; then
+                dog_error "Invalid -n value (must be a positive integer): $1"
                 usage
                 exit 1
             fi
@@ -67,20 +72,18 @@ done
 if [ -z "$PREFIX" ] && [ $# -gt 0 ]; then
     PREFIX="$1"
 fi
-if [ -z "$PREFIX" ]; then
-    dog_error "Missing required prefix argument."
-    usage
-    exit 1
-fi
 
 if [ ! -d "$TARGET_DIR" ]; then
     dog_error "Target path is not a directory: $TARGET_DIR"
     exit 1
 fi
 
-if ! [[ "$BATCH_SIZE" =~ ^[0-9]+$ ]] || [ "$BATCH_SIZE" -le 0 ]; then
-    dog_error "Invalid -n value (must be a positive integer): $BATCH_SIZE"
-    exit 1
+if [ -z "$PREFIX" ]; then
+    TARGET_DIR_CLEAN="${TARGET_DIR%/}"
+    PREFIX="$(basename "$TARGET_DIR_CLEAN")"
+    if [ -z "$PREFIX" ] || [ "$PREFIX" = "." ]; then
+        PREFIX="$(basename "$(pwd)")"
+    fi
 fi
 
 dog_log "Preparing to zip files"
