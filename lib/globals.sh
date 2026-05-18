@@ -16,6 +16,86 @@ dog_success() {
   echo "[dog 成功] $1"
 }
 
+dog_ensure_adb() {
+  local action_name="${1:-操作}"
+
+  if command -v adb &> /dev/null; then
+    return 0
+  fi
+
+  dog_error "adb 未安装，正在尝试安装..."
+  dog_log "执行: brew install --cask android-platform-tools"
+  brew install --cask android-platform-tools
+
+  if ! command -v adb &> /dev/null; then
+    dog_error "adb 安装失败，无法继续${action_name}"
+    return 1
+  fi
+
+  return 0
+}
+
+DOG_SELECTED_ADB_DEVICE=""
+
+dog_select_adb_device() {
+  local action_label="${1:-操作}"
+  local requested_device="${2:-}"
+  local device_lines=""
+  local devices=()
+  local serial=""
+  local found=false
+
+  DOG_SELECTED_ADB_DEVICE=""
+
+  device_lines=$(adb devices | awk 'NR > 1 && $2 == "device" {print $1}')
+
+  if [ -z "$device_lines" ]; then
+    dog_error "未检测到连接的安卓设备，请确保您的设备已连接并启用了 USB 调试"
+    return 1
+  fi
+
+  while IFS= read -r serial; do
+    [ -n "$serial" ] && devices+=("$serial")
+  done <<< "$device_lines"
+
+  if [ -n "$requested_device" ]; then
+    for serial in "${devices[@]}"; do
+      if [ "$serial" = "$requested_device" ]; then
+        found=true
+        break
+      fi
+    done
+
+    if [ "$found" = false ]; then
+      dog_error "未找到指定设备: $requested_device"
+      dog_log "当前可用设备:"
+      for serial in "${devices[@]}"; do
+        echo "  $serial"
+      done
+      return 1
+    fi
+
+    DOG_SELECTED_ADB_DEVICE="$requested_device"
+    return 0
+  fi
+
+  if [ ${#devices[@]} -eq 1 ]; then
+    DOG_SELECTED_ADB_DEVICE="${devices[0]}"
+    return 0
+  fi
+
+  dog_log "检测到多个安卓设备，请选择要${action_label}的设备:"
+  PS3="请选择设备 (输入数字): "
+  select serial in "${devices[@]}"; do
+    if [ -n "$serial" ]; then
+      DOG_SELECTED_ADB_DEVICE="$serial"
+      return 0
+    else
+      dog_error "无效选择，请重新选择"
+    fi
+  done
+}
+
 jetbrains_apps=("PyCharm" "GoLand" "IntelliJ IDEA" "IntelliJ IDEA CE" "WebStorm" "CLion" "PhpStorm" "RubyMine" "DataGrip")
 
 # 颜色定义
