@@ -95,7 +95,7 @@ files=()
 while IFS= read -r -d '' file_path; do
     base_name=$(basename "$file_path")
     files+=("$base_name")
-done < <(find "$TARGET_DIR" -maxdepth 1 -type f ! -name "*.zip" -print0 | sort -z)
+done < <(find "$TARGET_DIR" -maxdepth 1 -type f ! -name "*.zip" ! -name ".*" -print0 | sort -z)
 
 if [ ${#files[@]} -eq 0 ]; then
     dog_error "No files to zip in directory: $TARGET_DIR"
