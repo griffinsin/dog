@@ -18,7 +18,7 @@ usage() {
     echo "  dart run build_runner build --delete-conflicting-outputs"
     echo ""
     echo "完成后如需推送，请手动执行:"
-    echo "  dog rebasepush"
+    echo "  dog rp"
 }
 
 base_branch="dev"
@@ -118,7 +118,7 @@ finish_rebase_flow() {
         dog_log "当前有未提交改动，请确认后自行提交"
         git status --short
     fi
-    dog_log "如需推送，请手动执行: dog rebasepush"
+    dog_log "如需推送，请手动执行: dog rp"
 }
 
 ensure_git_repo

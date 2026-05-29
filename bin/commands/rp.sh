@@ -6,7 +6,7 @@
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 
 usage() {
-    echo "用法: dog rebasepush"
+    echo "用法: dog rp"
     echo "  -h, --help    显示帮助信息"
     echo ""
     echo "执行:"
