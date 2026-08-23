@@ -15,9 +15,11 @@ usage() {
     echo "  dart run build_runner build --delete-conflicting-outputs"
     echo ""
     echo "深度更新执行:"
-    echo "  cd \$(git rev-parse --show-toplevel)/apps/im_app"
+    echo "  ROOT=\$(git rev-parse --show-toplevel)"
+    echo "  bash \"\$ROOT/scripts/bootstrap_dev.sh\""
+    echo "  cd \"\$ROOT/apps/im_app\""
     echo "  flutter pub get"
-    echo "  清理 pubspec.lock 中 git 依赖对应的 build 目录"
+    echo "  rm -rf .dart_tool/build"
     echo "  dart run build_runner build --delete-conflicting-outputs"
 }
 
@@ -70,15 +72,22 @@ if [ "$deep_update" = true ]; then
     fi
 
     repo_root=$(git rev-parse --show-toplevel)
+    bootstrap_script="$repo_root/scripts/bootstrap_dev.sh"
     app_dir="$repo_root/apps/im_app"
+
+    if [ ! -f "$bootstrap_script" ]; then
+        dog_error "脚本不存在: $bootstrap_script"
+        exit 1
+    fi
 
     if [ ! -d "$app_dir" ]; then
         dog_error "目录不存在: $app_dir"
         exit 1
     fi
 
-    if [ ! -f "$app_dir/pubspec.lock" ]; then
-        dog_error "文件不存在: $app_dir/pubspec.lock"
+    dog_log "执行 bash $bootstrap_script..."
+    if ! bash "$bootstrap_script"; then
+        dog_error "bootstrap_dev.sh 执行失败"
         exit 1
     fi
 
@@ -91,14 +100,8 @@ if [ "$deep_update" = true ]; then
         exit 1
     fi
 
-    dog_log "清理 git 依赖对应的 build 目录..."
-    cleaned_count=0
-    while IFS= read -r dep_name; do
-        [ -n "$dep_name" ] || continue
-        rm -rf -- "build/$dep_name"
-        cleaned_count=$((cleaned_count + 1))
-    done < <(awk '/^  [^ ]+:$/{n=substr($1,1,length($1)-1)} /^    source: git$/{print n}' pubspec.lock | sort -u)
-    dog_log "已清理 build 目录数量: $cleaned_count"
+    dog_log "清理 .dart_tool/build..."
+    rm -rf -- ".dart_tool/build"
 
     run_build_runner
     dog_success "Flutter 深度更新和代码生成完成"
