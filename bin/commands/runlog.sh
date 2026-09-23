@@ -13,6 +13,11 @@ source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 # 关键字要取日志正文里的内容。不要用 'flutter:' 这种平台前缀：
 # iOS 是 "flutter: xxx"，Android 是 "I/flutter (pid): xxx"，换平台就匹配不上。
 #
+# 多个词会拼成一个关键字，所以 dog runlog user tapped login 不必加引号。
+# 但含 [ ] * ? 的关键字仍然必须加引号——那是 shell 的 glob，在 dog 拿到参数之前就
+# 被展开了，脚本里无论怎么写都救不回来。zsh 下表现为 no matches found 直接不执行；
+# 若当前目录恰好有同名文件，则会被静默换成文件名，用错误的关键字过滤且不报错。
+#
 # 停止 flutter run 用 q 或 Ctrl+C，不要用 Ctrl+Z。
 # Ctrl+Z 只是把进程冻住，冻住的 devicectl / lldb 会一直占着设备，
 # 下一次运行就会永远停在 "Installing and launching..."。
@@ -51,8 +56,8 @@ source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 #   - grep --：关键字以 - 开头时，不会被 grep 当成选项。
 #   - tail -F（大写）：文件被删掉重建（换了 inode）后会跟到新文件；小写 -f 会一直盯着
 #     已删除的旧文件。清空（: > 文件）两者都能处理。
-#   - OPTIND=1：bin/dog 用 source 执行子命令，OPTIND 是同一个 shell 的全局变量，
-#     不手动重置的话第二次解析会从上次的位置继续。
+#   - 参数解析是手写 while/case 而不是 getopts：getopts 的 OPTIND 在 source 执行下是
+#     同一个 shell 的全局变量，且 -- 的处理不好和「多词关键字」共存。
 #
 # 【日志文件】放在 $TMPDIR（macOS 下每用户隔离，权限 drwx------）而不是 /tmp。
 #   /tmp 下用 : > 建出来的文件是 644，同机器其他账户可读，而完整日志可能含连接令牌、
@@ -71,13 +76,19 @@ LAUNCH_RE='^Launching [^ ]+ on .* in (debug|profile|release) mode'
 DEVICE_RE='^Launching [^ ]+ on (.+) in (debug|profile|release) mode'
 
 usage() {
-    echo "用法: dog runlog [-n] '关键字' [flutter run 的额外参数...]"
-    echo "  关键字        必填，按普通文字匹配，[ ] 等符号不需要转义"
-    echo "  其余参数      原样传给 flutter run，例如 dog runlog 'Critical' --release"
+    echo "用法: dog runlog [-n] <关键字...> [flutter run 的选项...]"
+    echo "  关键字        必填。多个词会拼成一个关键字，不必加引号："
+    echo "                  dog runlog AppLaunchLink"
+    echo "                  dog runlog user tapped login     -> 关键字是 \"user tapped login\""
+    echo "  flutter 选项   遇到第一个 - 开头的参数起，全部原样传给 flutter run："
+    echo "                  dog runlog Critical --release"
     echo "  -n           只打印将要执行的命令，不开窗口、不清理进程、不运行"
-    echo "  -h           显示帮助信息"
+    echo "  -h, --help   显示帮助信息"
     echo ""
-    echo "关键字以 - 开头时，先写 -- 隔开：dog runlog -- '-xxx'"
+    echo "关键字以 - 开头时，用 -- 隔开：dog runlog -- -xxx"
+    echo "关键字含 [ ] * ? 等通配符时必须加引号，否则会被你的 shell 先展开："
+    echo "  dog runlog '[AppLaunchLink]'      正确"
+    echo "  dog runlog [AppLaunchLink]        zsh 报 no matches found，或被展开成同名文件"
     echo ""
     echo "当前窗口跑 flutter run（选设备、r / R / q 都在这里），"
     echo "选定设备后自动新开一个窗口，只显示命中关键字的行。"
@@ -87,24 +98,47 @@ usage() {
 # bash 3.2 没有 ${x@Q}，用 printf %q 做 shell 转义（等价于 zsh 的 ${(q)x}）
 shq() { printf '%q' "$1"; }
 
+# 手写参数解析而非 getopts：既要自己处理 --，也避开 source 执行下 OPTIND 是全局变量的坑
 dry_run=false
-OPTIND=1   # 见上方【这些细节不能删】
-while getopts ":nh" opt; do
-    case $opt in
-        n) dry_run=true ;;
-        h) usage; exit 0 ;;
-        \?) dog_error "未知选项 -$OPTARG"; usage >&2; exit 1 ;;
+literal_next=false
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -n) dry_run=true; shift ;;
+        -h|--help) usage; exit 0 ;;
+        --) shift; literal_next=true; break ;;
+        -*) dog_error "未知选项 $1"; usage >&2; exit 1 ;;
+        *) break ;;
     esac
 done
-shift $((OPTIND - 1))
 
-keyword="${1:-}"
+# 关键字取法：
+#   有 --      -> 只取紧随其后的那一个参数（关键字以 - 开头时的转义出口）
+#   没有 --    -> 取开头所有「不以 - 开头」的参数，用空格拼成一个关键字，
+#                 这样 dog runlog abc def 不必写引号；遇到第一个 -xxx 就停，
+#                 其余原样交给 flutter run
+if [ "$literal_next" = true ]; then
+    keyword="${1:-}"
+    [ $# -gt 0 ] && shift
+else
+    kw_parts=()
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -*) break ;;
+            *) kw_parts[${#kw_parts[@]}]="$1"; shift ;;
+        esac
+    done
+    if [ ${#kw_parts[@]} -gt 0 ]; then
+        keyword="${kw_parts[*]}"
+    else
+        keyword=""
+    fi
+fi
+
 if [ -z "$keyword" ]; then
     dog_error "缺少关键字"
     usage >&2
     exit 1
 fi
-shift
 
 if ! command -v flutter >/dev/null 2>&1; then
     dog_error "未找到 flutter 命令，请先安装或配置 Flutter"
