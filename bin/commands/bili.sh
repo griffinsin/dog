@@ -5,15 +5,24 @@
 # 加载全局变量和函数
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 
-BILI_DIR="$(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/bili"
+BILI_LIB="$(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/bili"
+BILI_TOOL="$BILI_LIB/bili_tool.py"          # dog 自己的：探测 + 扫码登录
+BILI_GET="$BILI_LIB/vendor/bili_get.py"     # 外部快照，统一下载入口
 COOKIE_DEFAULT="$HOME/.config/dog/bili_cookies.txt"
 
 # ───────────────────────── 给维护者 ─────────────────────────
 #
-# lib/bili/ 下的 4 个脚本（bili_get / bili_dl / bili_season / bili_space_list）
-# 是从 ~/dev/scripts 逐字节复制过来的，没有改一行。那边记录了大量踩坑修复
-# （见同目录 BILIBILI-NOTES.md），重写不划算。两份是独立副本，那边改了要手动同步。
-# 本命令新增的只有 bili_probe.py（探测）和 bili_login.py（扫码登录）。
+# 【目录分工】
+#   lib/bili/bili_tool.py    dog 自己的 Python：probe（探测）+ login/check（扫码登录）
+#   lib/bili/vendor/*.py     从 ~/dev/scripts 逐字节复制的外部快照，**不要在这里改**
+#   lib/bili/vendor/BILIBILI-NOTES.md   那套代码的说明书，下面多处判断以它为依据
+#
+#   vendor/ 里 4 个脚本（bili_get / bili_dl / bili_season / bili_space_list）一行未改，
+#   可以直接 cmp 对 ~/dev/scripts 验证漂移：
+#       for f in bili_get bili_dl bili_season bili_space_list; do
+#         cmp ~/dev/scripts/$f.py lib/bili/vendor/$f.py; done
+#   要改逻辑就去 ~/dev/scripts 改，再复制回来。它们靠 __file__ 相对路径互相调用
+#   （bili_get -> bili_season -> bili_dl），所以必须整组放在同一目录。
 #
 # 【为什么画质菜单必须先探测】
 #   BILIBILI-NOTES.md 第五节：accept_description 列的是视频「存在」的画质，
@@ -108,7 +117,7 @@ done
 case "$action" in
     login)
         ensure_qrencode || { dog_error "没有 qrencode，无法扫码登录"; exit 1; }
-        python3 "$BILI_DIR/bili_login.py" -o "$cookies"
+        python3 "$BILI_TOOL" login -o "$cookies"
         exit $?
         ;;
     whoami)
@@ -117,7 +126,7 @@ case "$action" in
             dog_log "画质上限 480P。运行 dog bili --login 扫码登录"
             exit 1
         fi
-        uname_out=$(python3 "$BILI_DIR/bili_login.py" --check -o "$cookies" 2>/dev/null)
+        uname_out=$(python3 "$BILI_TOOL" check -o "$cookies" 2>/dev/null)
         if [ -n "$uname_out" ]; then
             dog_success "已登录: $uname_out"
             exit 0
@@ -165,7 +174,7 @@ if [[ "$url" =~ [?\&]p=([0-9]+) ]]; then
 fi
 
 dog_log "探测中..."
-probe=$(python3 "$BILI_DIR/bili_probe.py" "$url" "${cookie_arg[@]}" 2>&1)
+probe=$(python3 "$BILI_TOOL" probe "$url" "${cookie_arg[@]}" 2>&1)
 probe_rc=$?
 
 err=$(printf '%s\n' "$probe" | awk -F'\t' '$1=="ERR"{print $2}')
@@ -212,7 +221,7 @@ fi
 echo
 
 if [ "$list_only" = true ]; then
-    exec python3 "$BILI_DIR/bili_get.py" "$url" --list "${cookie_arg[@]}" --codec "$codec"
+    exec python3 "$BILI_GET" "$url" --list "${cookie_arg[@]}" --codec "$codec"
 fi
 
 # ── 菜单1：下载范围 ──────────────────────────────────────────
@@ -289,7 +298,7 @@ if [ -z "$quality" ] && [ -n "$qlines" ]; then
 fi
 
 # ── 组装并执行 ──────────────────────────────────────────────
-cmd=(python3 "$BILI_DIR/bili_get.py" "$url" -o "$outdir" --codec "$codec")
+cmd=(python3 "$BILI_GET" "$url" -o "$outdir" --codec "$codec")
 [ ${#cookie_arg[@]} -gt 0 ] && cmd+=("${cookie_arg[@]}")
 [ -n "$quality" ] && cmd+=(-q "$quality")
 
