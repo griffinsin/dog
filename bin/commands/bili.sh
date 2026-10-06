@@ -5,7 +5,26 @@
 # 加载全局变量和函数
 source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 
-BILI_LIB="$(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/bili"
+# 定位 lib/bili：仓库里和 brew 装完后的布局不一样，必须两种都兼容。
+#   仓库:     <root>/bin/commands/bili.sh   -> <root>/lib/bili
+#   brew 装后: <prefix>/commands/bili.sh     -> <prefix>/lib/bili      （少了 bin/ 一层）
+# 其他命令只用 dirname×3 找 globals.sh，而 Formula 会把那一行重写成绝对路径，
+# 所以它们靠重写能跑；bili 是第一个引用 lib/ 下其他文件的命令，数层数必然算错。
+# 这里不数层数，直接看哪个候选目录真实存在。
+_bili_cmd_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BILI_LIB=""
+# 判定用「目标文件是否存在」而不是「目录是否存在」：目录可能是旧版留下的空壳。
+for _cand in "$_bili_cmd_dir/../lib/bili" "$_bili_cmd_dir/../../lib/bili"; do
+    if [ -f "$_cand/bili_tool.py" ] && [ -f "$_cand/vendor/bili_get.py" ]; then
+        BILI_LIB="$(cd "$_cand" && pwd)"
+        break
+    fi
+done
+if [ -z "$BILI_LIB" ]; then
+    dog_error "找不到 lib/bili（已查 $_bili_cmd_dir 的上一级和上两级）"
+    dog_error "若是 brew 安装，试 dog upgrade 重装"
+    exit 1
+fi
 BILI_TOOL="$BILI_LIB/bili_tool.py"          # dog 自己的：探测 + 扫码登录
 BILI_GET="$BILI_LIB/vendor/bili_get.py"     # 外部快照，统一下载入口
 COOKIE_DEFAULT="$HOME/.config/dog/bili_cookies.txt"
