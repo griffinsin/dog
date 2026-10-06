@@ -313,15 +313,74 @@ case "$scope" in
     pick) cmd+=(--pick "$pick") ;;
 esac
 
+# ── 单个完整视频：下完用「视频标题」重命名 ──────────────────────
+#
+# vendor/bili_dl.py 按「分P标题」命名（1-<分P标题>.mp4），而单P视频的分P标题
+# 常常是 UP 的原始文件名，例如 1-studio_video_1773562639855.mp4
+# （BILIBILI-NOTES.md 第八节记了这个坑）。vendor/bili_season.py 已经在整合集
+# 路径里做了扁平化改名，但 --this-only / 单个视频是直接走 bili_dl.py 的，绕过了它。
+# 这里在 bash 侧补上，不动 vendor。
+#
+# 只在「本次下载就代表一个完整视频」时改名：
+#   kind=single                          本来就只有 1 个分P
+#   kind=season + 只下当前 + PAGES=1     合集里的单P视频
+# 多分P视频的分P标题是有意义的区分标识，不能都改成同一个视频标题；
+# kind=season + 全部 走的是 bili_season.py，它自己已经处理。
+rename_single=false
+if [ "$kind" = "single" ]; then
+    rename_single=true
+elif [ "$kind" = "season" ] && [ "$scope" = "this" ] && [ "$npages" = "1" ]; then
+    rename_single=true
+fi
+
+flat=""
+if [ "$rename_single" = true ]; then
+    flat="$outdir/$(python3 "$BILI_TOOL" safename "$title").mp4"
+fi
+
 if [ "$dry_run" = true ]; then
     echo "将执行: ${cmd[*]}"
+    [ -n "$flat" ] && echo "下完重命名为: $flat"
     exit 0
+fi
+
+# 预检必须在下载前：改名后 bili_dl.py 的「文件已存在就跳过」会失效
+# （它找的是 1-<分P标题>.mp4），不预检的话重跑会整个重新下一遍。
+# vendor/bili_season.py 也是这个顺序。
+if [ -n "$flat" ] && [ -e "$flat" ]; then
+    dog_log "已存在，跳过: $flat"
+    exit 0
+fi
+
+# 用时间戳标记而不是前后快照对比：已存在被 bili_dl 跳过的文件 mtime 是旧的，
+# 天然不会被误判成本次产物。find -newer 是 POSIX，不依赖 GNU 扩展。
+marker=""
+if [ -n "$flat" ]; then
+    mkdir -p "$outdir"
+    marker="$outdir/.dog_bili_marker.$$"
+    : > "$marker"
 fi
 
 dog_log "执行: ${cmd[*]}"
 echo
 "${cmd[@]}"
 rc=$?
+
+if [ -n "$marker" ]; then
+    if [ $rc -eq 0 ]; then
+        produced=$(find "$outdir" -maxdepth 1 -type f -name '*.mp4' -newer "$marker" 2>/dev/null)
+        count=$(printf '%s' "$produced" | grep -c . )
+        if [ "$count" = "1" ] && [ "$produced" != "$flat" ]; then
+            if [ -e "$flat" ]; then
+                dog_error "目标名已存在，保留原名: $(basename "$produced")"
+            else
+                mv "$produced" "$flat" && dog_log "重命名: $(basename "$produced") -> $(basename "$flat")"
+            fi
+        fi
+    fi
+    rm -f "$marker"
+fi
+
 if [ $rc -eq 0 ]; then
     dog_success "完成 -> $(cd "$outdir" 2>/dev/null && pwd || echo "$outdir")"
 else

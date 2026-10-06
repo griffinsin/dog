@@ -27,7 +27,7 @@ import urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "vendor"))
 from bili_space_list import Space          # 复用 WBI 签名与会话
-from bili_dl import QUALITY, parse_bvid     # 复用画质名表与 BV 解析
+from bili_dl import QUALITY, parse_bvid, safe_name   # 复用画质名表 / BV 解析 / 文件名清洗
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -291,6 +291,14 @@ def cmd_login(args):
     return 0
 
 
+def cmd_safename(args):
+    """把标题清洗成合法文件名。直接复用 vendor/bili_dl.py 的 safe_name，
+    保证和下载器自己的命名规则完全一致 —— 不在 bash 里另写一套正则：
+    .zshrc 有 coreutils/gnubin，sed/grep 是 GNU 还是 BSD 随上下文变化。"""
+    print(safe_name(args.title))
+    return 0
+
+
 def cmd_check(args):
     ok, uname = login_state(args.out)
     print(uname or "", end="")
@@ -313,6 +321,10 @@ def main():
     p.add_argument("-o", "--out", required=True, help="cookie 文件输出路径")
     p.add_argument("--timeout", type=int, default=180, help="扫码等待秒数（默认 180）")
     p.set_defaults(func=cmd_login)
+
+    p = sub.add_parser("safename", help="把标题清洗成合法文件名（复用下载器的规则）")
+    p.add_argument("title", help="原始标题")
+    p.set_defaults(func=cmd_safename)
 
     p = sub.add_parser("check", help="检查现有 cookie 的登录态")
     p.add_argument("-o", "--out", required=True, help="cookie 文件路径")
