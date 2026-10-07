@@ -54,6 +54,18 @@ COOKIE_DEFAULT="$HOME/.config/dog/bili_cookies.txt"
 #   过去只能靠浏览器扩展导出。官方 web 扫码登录接口能完全在终端走完，
 #   不用密码、不碰验证码。cookie 落盘时强制 0600——它等同于登录凭证。
 #
+# 【中文变量必须写成 ${var} 而不是 $var】
+#   macOS 自带 bash 3.2.57 在 UTF-8 locale 下有个多字节 bug：双引号字符串里
+#   裸 $var 后面紧跟多字节字符时，变量内容消失、后一个字符还被吃掉一个字节。
+#     LANG=C.UTF-8 bash -c 'x=abc; echo "前（$x）后"'   -> 前（??后
+#     LANG=C.UTF-8 bash -c 'x=abc; echo "前（${x}）后"' -> 前（abc）后   正确
+#   带花括号免疫，printf "%s" 也免疫；zsh 和新版 bash 都没这问题。
+#   用户的交互式 shell 是 LANG=C.UTF-8，所以这是会真实触发的，
+#   而本工具跑在 LC_CTYPE=C 的环境里恰好看不到 —— 测显示效果要用
+#     zsh -lic 'dog bili ...'
+#   lib/globals.sh 里 print_color_with_var 那段注释把病因写成「变量名含特殊
+#   字符」，实际病因是这个 locale + 多字节的解析 bug。
+#
 # 【风控】笔记第一节：-352 不能硬闯，冷却几十分钟到几小时。
 #   本命令一次探测 5 个接口（首页/nav/wbi_view/pagelist/playurl），彼此留 0.6s。
 #   都不是空间列表那类高危接口。-y 跳过交互但不减少探测次数。
@@ -181,7 +193,7 @@ case "$action" in
         ;;
     whoami)
         if [ ! -f "$cookies" ]; then
-            dog_log "未登录（没有 cookie 文件: $cookies）"
+            dog_log "未登录（没有 cookie 文件: ${cookies}）"
             dog_log "画质上限 480P。运行 dog bili --login 扫码登录"
             exit 1
         fi
@@ -321,7 +333,7 @@ echo "  标题: $title"
 echo "  UP:   $up"
 case "$kind" in
     season)
-        echo "  合集『$season_title』共 $season_count 个视频"
+        echo "  合集『${season_title}』共 $season_count 个视频"
         [ "$npages" -gt 1 ] 2>/dev/null && echo "  （当前这个视频自身还有 $npages 个分P）"
         ;;
     pages) echo "  共 $npages 个分P" ;;
@@ -344,18 +356,18 @@ fi
 
 if [ -z "$scope" ] && [ "$kind" != "single" ]; then
     if [ "$kind" = "season" ]; then
-        one_desc="只下当前这个视频「$title」"
-        all_desc="下载整个合集『$season_title』共 $season_count 个视频"
+        one_desc="只下当前这个视频「${title}」"
+        all_desc="下载整个合集『${season_title}』共 $season_count 个视频"
         range_hint="按合集顺序，第几个视频"
     else
-        one_desc="只下当前这个分P（P$cur_page）"
+        one_desc="只下当前这个分P（P${cur_page}）"
         all_desc="下载全部 $npages 个分P"
         range_hint="分P号"
     fi
     print_color "$CYAN" "下载范围："
     echo "  1) $one_desc"
     echo "  2) $all_desc"
-    echo "  3) 指定范围（$range_hint，如 1-10,15）"
+    echo "  3) 指定范围（${range_hint}，如 1-10,15）"
     while true; do
         printf "请选择 [1/2/3] (默认 2): "
         read -r ans
@@ -513,6 +525,6 @@ fi
 if [ $rc -eq 0 ]; then
     dog_success "完成 -> $(cd "$outdir" 2>/dev/null && pwd || echo "$outdir")"
 else
-    dog_error "下载失败（退出码 $rc）"
+    dog_error "下载失败（退出码 ${rc}）"
 fi
 exit $rc
