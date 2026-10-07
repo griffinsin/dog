@@ -124,7 +124,7 @@ COVER_IMAGE_PATH="$IMAGE_PATH"
 
 if [ "$NO_COMPRESS" = false ]; then
     if [[ "$IMAGE_EXT" == "png" || "$IMAGE_EXT" == "webp" ]]; then
-        vlog "检测到图片格式为 .$IMAGE_EXT，默认将转为 JPEG（质量 75，不改宽高）"
+        vlog "检测到图片格式为 .${IMAGE_EXT}，默认将转为 JPEG（质量 75，不改宽高）"
 
         IMAGE_DIR=$(dirname "$IMAGE_PATH")
         IMAGE_BASE=$(basename "$IMAGE_PATH")

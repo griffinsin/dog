@@ -109,28 +109,41 @@ WHITE="37"
 RESET="0"
 
 print_color() {
+	# 文本必须作为 printf 的「参数」而不是拼进格式串：
+	# 拼进格式串时文本里的 % 会被当成格式符吃掉。实测 dog img 里的
+	#   print_color "$BLUE" "magick input.png -resize 50% output.png"
+	# 会输出 "...-resize 500utput.png"（% o 被解释成八进制转换），
+	# 而 dog img 的用途恰恰是给出一行可直接复制的命令。
+	# 同理文本里的 \n 之类也会被当转义解释。
 	local color_code="$1"
 	local text="$2"
-	printf "\033[${color_code}m${text}\033[0m\n"
+	printf "\033[%sm%s\033[0m\n" "$color_code" "$text"
 }
 
 print_color_with_var() {
-	# 解决 bash 函数中变量名包含特殊字符时的截断问题
-	# 
-	# 问题描述：
-	# - 某些变量名（如 "PyCharm2025.1"）在 print_color 函数中会被截断为乱码
-	# - 这是 bash 在处理包含 ANSI 转义序列和特殊字符的字符串时的边缘情况 bug
-	# - 直接在 printf 格式字符串中混合变量和转义序列会导致解析异常
+	# 把「带颜色的提示文本」和「变量值」分成两行输出，绕开 bash 3.2 的多字节 bug。
 	#
-	# 解决方案：
-	# - 将输出分为两行：第一行显示带颜色的提示文本，第二行显示变量名
-	# - 避免在同一个字符串中混合 ANSI 转义序列和变量内容
-	# - 使用箭头符号 "➜" 增强变量名的视觉识别度
+	# 真正的病因（2026-10 查明，此前这里写的是「变量名包含特殊字符」，是错的）：
+	#   macOS 自带 bash 3.2.57 在 UTF-8 locale 下，双引号字符串里**裸 $var 后面
+	#   紧跟多字节字符**时，变量内容会消失，后面那个字符还被吃掉一个字节。
+	#     LANG=C.UTF-8 bash -c 'x=abc; echo "前（$x）后"'   -> 前（??后
+	#     LANG=C.UTF-8 bash -c 'x=abc; echo "前（${x}）后"' -> 前（abc）后   正确
+	#   当年看到的 "PyCharm2025.1 被截断成乱码" 就是这个 —— 和变量名里有没有点号
+	#   无关，是调用方写成了 "...$app（完成）" 这种裸变量紧贴全角括号的形式。
+	#   触发条件：bash 3.x + UTF-8 locale + 裸 $var + 紧跟非 ASCII 字符。
+	#   ${var} 形式免疫，printf "%s" 传参也免疫；zsh 和新版 bash 都没这问题。
+	#
+	# 所以更简单的办法是调用方把 $var 写成 ${var}，不一定要用本函数。
+	# 本函数保留是因为「提示语一行、值另起一行带 ➜」这个排版本身也更好读。
+	#
+	# 注意：验证中文显示效果必须在真实 locale 下，例如
+	#     zsh -lic 'dog xxx'
+	# 某些执行环境是 LC_CTYPE=C，恰好绕过这个 bug，看不出问题。
 	#
 	# 参数：
 	# $1 - 颜色代码（如 $GREEN, $RED, $YELLOW 等）
 	# $2 - 提示文本（不带变量名）
-	# $3 - 需要显示的变量名
+	# $3 - 需要显示的变量值
 	#
 	# 使用示例：
 	# print_color_with_var "$GREEN" "设置已复制到" "$app_name"
@@ -138,10 +151,10 @@ print_color_with_var() {
 	# 输出效果：
 	# 设置已复制到 (绿色)
 	# ➜ PyCharm2025.1 (普通文本)
-	
+
 	local color_code="$1"
 	local prefix="$2"
 	local variable="$3"
-	printf "\033[${color_code}m${prefix}\033[0m\n"
+	printf "\033[%sm%s\033[0m\n" "$color_code" "$prefix"
 	printf "➜ %s\n" "$variable"
 }
