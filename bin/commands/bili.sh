@@ -59,29 +59,67 @@ COOKIE_DEFAULT="$HOME/.config/dog/bili_cookies.txt"
 #   都不是空间列表那类高危接口。-y 跳过交互但不减少探测次数。
 
 usage() {
-    echo "用法: dog bili <URL或BV号> [选项]"
-    echo "      dog bili --login | --logout | --whoami"
-    echo ""
-    echo "  -o <目录>      输出目录（默认当前目录）"
-    echo "  -q <画质id>    直接指定画质，跳过画质菜单（80=1080P 64=720P 32=480P）"
-    echo "  --pick <范围>  直接指定范围，跳过范围菜单（如 1-10,15）"
-    echo "  --all          下载全部（合集全部视频 / 全部分P），跳过范围菜单"
-    echo "  --this         只下当前这一个，跳过范围菜单"
-    echo "  -y             全部用默认：全部下载 + 最高可用画质，不交互"
-    echo "  -n             只打印将要执行的命令，不下载"
-    echo "  --list         只列出内容，不下载"
-    echo "  --cookies <f>  指定 cookie 文件（默认 $COOKIE_DEFAULT）"
-    echo "  --codec <c>    avc(默认) | hev | av0"
-    echo "  -h, --help     显示帮助"
-    echo ""
-    echo "URL 含 ? 或 & 时必须加引号，否则 & 会被 shell 当成后台符号把命令截断："
-    echo "  dog bili 'https://www.bilibili.com/video/BVxxx?p=7'    正确"
-    echo "  dog bili BVxxx                                          BV 号不需要引号"
-    echo ""
-    echo "账号（720P 以上需登录）:"
-    echo "  dog bili --login    手机扫码登录，cookie 存到默认路径"
-    echo "  dog bili --whoami   查看当前登录态"
-    echo "  dog bili --logout   删除本地 cookie"
+    cat <<'HELP'
+dog bili —— 下载 B 站视频 / 视频选集 / 合集
+
+用法
+  dog bili [URL或BV号] [选项]        不给则从剪贴板读
+  dog bili --login | --whoami | --logout
+
+最常用：先 cd 到目标目录，复制好链接，然后直接跑
+  dog bili
+它会从剪贴板取链接（剪贴板里没有就提示你粘贴），然后依次问两件事：
+
+  ① 下载范围（菜单随视频类型变，直接回车=全部）
+       合集    1) 只下当前这个视频  2) 整个合集 N 个  3) 指定范围
+       多分P   1) 只下当前分P       2) 全部 N 个分P   3) 指定范围
+       单个视频  不问，直接下
+  ② 画质（直接回车=最高可用）
+       只列「实际能取到」的，不照固定表硬列。未登录通常只有 480P/360P，
+       并会提示站点声明存在哪些更高画质。
+
+跳过交互
+  dog bili BVxxx -y                  全部 + 最高可用画质，全程不问
+  dog bili BVxxx --this              只下当前这一个
+  dog bili BVxxx --all               整个合集 / 全部分P
+  dog bili BVxxx --pick 2-5          指定范围（也可 1-10,15）
+  dog bili BVxxx --all -q 32         指定画质 id
+  dog bili BVxxx -o ~/Videos/美文     指定输出目录
+  dog bili BVxxx --list              只看内容，不下载
+  dog bili BVxxx -n                  只打印将执行的命令，不下载
+
+账号（720P 以上必须登录）
+  dog bili --login                   手机 B站 App 扫码，首次会提示装 qrencode
+  dog bili --whoami                  查看当前登录态
+  dog bili --logout                  删除本地 cookie
+  cookie 存在 ~/.config/dog/bili_cookies.txt，权限 600
+
+URL 怎么传（? 和 & 是 shell 的特殊字符，由 shell 先处理，脚本救不了）
+  dog bili                           推荐：从剪贴板读，不经过 shell，无需引号
+  dog bili BVxxx                     BV 号没有特殊字符，不用引号
+  dog bili 'https://...?p=7'         直接给 URL 必须加引号
+  URL 里的 ?p=N 会被识别，「只下当前」据此定位到第 N 个分P
+
+文件命名
+  合集成员（单独下或整批下）   {序号}-{视频标题}.mp4   序号两条路径一致，排序正确
+  多分P视频                   {分P号}-{分P标题}.mp4
+  独立单个视频                {视频标题}.mp4
+
+重跑是安全的：文件已存在会预检跳过，不重复下载；中断的分片下次续传。
+
+选项
+  -o <目录>      输出目录（默认当前目录）
+  -q <画质id>    80=1080P 64=720P 32=480P 16=360P
+  --pick <范围>  指定范围，如 1-10,15
+  --all          下载全部
+  --this         只下当前这一个
+  -y             不交互，全部用默认
+  -n             只打印将执行的命令
+  --list         只列出内容
+  --cookies <f>  指定 cookie 文件
+  --codec <c>    avc(默认) | hev | av0
+  -h, --help     显示本帮助
+HELP
 }
 
 ensure_qrencode() {
@@ -165,9 +203,40 @@ esac
 
 # ───────────────────────── 下载流程 ─────────────────────────
 
+# ── 没给 URL：从剪贴板读，再退化为提示粘贴 ─────────────────────
+#
+# 为什么要这么做：URL 里的 ? 和 & 是 shell 在把参数交给 dog 之前就处理掉的，
+# 脚本里无论怎么写都救不回来 ——
+#   ...BVxxx?p=7       zsh 报 no matches found，命令根本没执行
+#   ...?p=7&t=30       & 被当成后台符号，命令截断，&t=30 丢失
+# zsh 的 noglob 能救 ? 但救不了 &（实测），做成包装函数是半修还给人错觉。
+# 根本办法是别让 URL 经过 shell：剪贴板和 read 都不经 shell 解析。
 if [ -z "$url" ]; then
-    dog_error "缺少 URL 或 BV 号"
-    usage >&2
+    if command -v pbpaste >/dev/null 2>&1; then
+        clip=$(pbpaste 2>/dev/null | tr -d '\r' | head -1)
+        if printf '%s' "$clip" | grep -qE 'BV[0-9A-Za-z]{10}'; then
+            url="$clip"
+            dog_log "从剪贴板读到: $url"
+        fi
+    fi
+fi
+
+if [ -z "$url" ]; then
+    # 回显识别结果前先说明来源，不静默拿一个用户没预期的东西去下载
+    if command -v pbpaste >/dev/null 2>&1; then
+        dog_log "剪贴板里没有 B 站链接或 BV 号"
+    fi
+    printf "请粘贴 URL 或 BV 号（直接回车取消）: "
+    read -r url
+    url=$(printf '%s' "$url" | tr -d '\r')
+    if [ -z "$url" ]; then
+        dog_error "已取消"
+        exit 1
+    fi
+fi
+
+if ! printf '%s' "$url" | grep -qE 'BV[0-9A-Za-z]{10}'; then
+    dog_error "识别不到 BV 号: $url"
     exit 1
 fi
 
@@ -371,8 +440,12 @@ if [ "$rename_single" = true ]; then
 fi
 
 if [ "$dry_run" = true ]; then
-    echo "将执行: ${cmd[*]}"
-    [ -n "$flat" ] && echo "下完重命名为: $flat"
+    # 逐个 printf %q 转义：URL 里的 ? & 不转义的话，这行打印出来的命令
+    # 复制去跑会被 shell 截断 —— -n 的意义就是给一条真能跑的命令
+    _show=""
+    for _a in "${cmd[@]}"; do _show="$_show $(printf '%q' "$_a")"; done
+    echo "将执行:${_show}"
+    [ -n "$flat" ] && echo "下完重命名为: $(printf '%q' "$flat")"
     exit 0
 fi
 
