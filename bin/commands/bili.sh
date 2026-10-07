@@ -96,6 +96,8 @@ dog bili —— 下载 B 站视频 / 视频选集 / 合集
 
 URL 怎么传（? 和 & 是 shell 的特殊字符，由 shell 先处理，脚本救不了）
   dog bili                           推荐：从剪贴板读，不经过 shell，无需引号
+                                     会扫剪贴板全部行取第一个 B 站链接，
+                                     展示出来等你确认（-y 则直接用）
   dog bili BVxxx                     BV 号没有特殊字符，不用引号
   dog bili 'https://...?p=7'         直接给 URL 必须加引号
   URL 里的 ?p=N 会被识别，「只下当前」据此定位到第 N 个分P
@@ -211,21 +213,43 @@ esac
 #   ...?p=7&t=30       & 被当成后台符号，命令截断，&t=30 丢失
 # zsh 的 noglob 能救 ? 但救不了 &（实测），做成包装函数是半修还给人错觉。
 # 根本办法是别让 URL 经过 shell：剪贴板和 read 都不经 shell 解析。
-if [ -z "$url" ]; then
-    if command -v pbpaste >/dev/null 2>&1; then
-        clip=$(pbpaste 2>/dev/null | tr -d '\r' | head -1)
-        if printf '%s' "$clip" | grep -qE 'BV[0-9A-Za-z]{10}'; then
-            url="$clip"
-            dog_log "从剪贴板读到: $url"
-        fi
+# 扫剪贴板的「全部行」，取第一个含 BV 号的，并且只提取其中的 URL 或裸 BV 号，
+# 不是整行拿走：
+#   - 只看第一行的话，从聊天记录/文档里复制时 URL 常常不在第一行，取不到；
+#   - 整行拿走则会把旁边的文字一起带下去，而 ?p=N 的解析是在整个 url 串上做正则，
+#     像「价格 p=100 看这个 https://...BVxxx」就会被误判成下载第 100 个分P。
+# URL 候选写在前面，这样一行里同时有裸 BV 和完整 URL 时优先取 URL（带 ?p= 信息）。
+#
+# 剪贴板历史拿不到：pbpaste 只有当前这一份，macOS 不对外开放历史。
+# 所以不存在「最近的一条」，只有「当前这一条」。
+clip_url=""
+if [ -z "$url" ] && command -v pbpaste >/dev/null 2>&1; then
+    clip_url=$(pbpaste 2>/dev/null | tr -d '\r' \
+               | grep -oE 'https?://[^[:space:]]*BV[0-9A-Za-z]{10}[^[:space:]]*|BV[0-9A-Za-z]{10}' \
+               | head -1)
+fi
+
+if [ -z "$url" ] && [ -n "$clip_url" ]; then
+    # 从剪贴板拿到的东西必须先让用户看到并确认 —— 直接拿去下载太突然，
+    # 而且提取可能带上多余的尾部标点，展示出来才能发现。
+    if [ "$assume_yes" = true ]; then
+        url="$clip_url"
+        dog_log "从剪贴板读到: $url"
+    else
+        dog_log "从剪贴板读到:"
+        print_color "$CYAN" "  $clip_url"
+        printf "使用这个链接？[回车=是 / n=手动输入]: "
+        read -r _ans
+        case "$_ans" in
+            [Nn]*) ;;                 # 落到下面的手动粘贴
+            *) url="$clip_url" ;;
+        esac
     fi
+elif [ -z "$url" ] && command -v pbpaste >/dev/null 2>&1; then
+    dog_log "剪贴板里没有 B 站链接或 BV 号"
 fi
 
 if [ -z "$url" ]; then
-    # 回显识别结果前先说明来源，不静默拿一个用户没预期的东西去下载
-    if command -v pbpaste >/dev/null 2>&1; then
-        dog_log "剪贴板里没有 B 站链接或 BV 号"
-    fi
     printf "请粘贴 URL 或 BV 号（直接回车取消）: "
     read -r url
     url=$(printf '%s' "$url" | tr -d '\r')
