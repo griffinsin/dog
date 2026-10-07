@@ -210,6 +210,7 @@ fi
 g() { printf '%s\n' "$probe" | awk -F'\t' -v k="$1" '$1==k{print $2; exit}'; }
 kind=$(g KIND); title=$(g TITLE); up=$(g UP); npages=$(g PAGES)
 logged=$(g LOGGED); season_title=$(g SEASON_TITLE); season_count=$(g SEASON_COUNT)
+season_index=$(g SEASON_INDEX); season_width=$(g SEASON_WIDTH)
 qdecl=$(g QDECL)
 
 printf '%s\n' "$probe" | awk -F'\t' '$1=="WARN"{print "  ! "$2}' >&2
@@ -352,9 +353,21 @@ elif [ "$kind" = "season" ] && [ "$scope" = "this" ] && [ "$npages" = "1" ]; the
     rename_single=true
 fi
 
+# 合集成员单独下载时要带上它在合集里的序号，和 vendor/bili_season.py 的
+# {序号}-{标题} 对齐，否则单独下的和整合集下的混在同一目录会排错序 ——
+# 实测没有前缀时第 1 集会排到最后（BILIBILI-NOTES.md 第八节记了排序陷阱）。
+# 序号来自 probe 的 SEASON_INDEX，取自 wbi/view 已返回的 episodes 列表，
+# 不额外调接口；多 section 的合集 probe 不给序号，这里自然退化成无前缀。
+# kind=single 不属于任何合集，确实没有序列，保持无前缀。
 flat=""
 if [ "$rename_single" = true ]; then
-    flat="$outdir/$(python3 "$BILI_TOOL" safename "$title").mp4"
+    _base="$(python3 "$BILI_TOOL" safename "$title")"
+    if [ -n "$season_index" ]; then
+        _tag=$(printf "%0${season_width:-1}d" "$season_index")
+        flat="$outdir/${_tag}-${_base}.mp4"
+    else
+        flat="$outdir/${_base}.mp4"
+    fi
 fi
 
 if [ "$dry_run" = true ]; then

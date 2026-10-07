@@ -95,6 +95,25 @@ def cmd_probe(args):
         out("KIND", "season")
         out("SEASON_TITLE", season.get("title") or "")
         out("SEASON_COUNT", season.get("ep_count") or 0)
+        # 当前视频在合集里排第几 —— 用来和 vendor/bili_season.py 的命名对齐，
+        # 它按 f"{序号:0{width}d}-{标题}" 命名（width = 总集数的位数）。
+        # 这份有序列表就在本次 wbi/view 的响应里，不用再调 seasons_archives_list。
+        #
+        # 只在单 section 时给序号：实测单 section 的 episodes 顺序与
+        # seasons_archives_list 完全一致，但多 section 的合集没有样本可验，
+        # 而序号错位比没有序号更糟（BILIBILI-NOTES.md 第九节：集合相等≠顺序相同，
+        # 曾因此前 64 位里错了 31 位）。多 section 就不给，让调用方不加前缀。
+        secs = season.get("sections") or []
+        if len(secs) == 1:
+            eps = secs[0].get("episodes") or []
+            for i, e in enumerate(eps, 1):
+                if e.get("bvid") == bvid:
+                    out("SEASON_INDEX", i)
+                    out("SEASON_WIDTH", len(str(len(eps))))
+                    break
+        elif len(secs) > 1:
+            out("WARN", f"合集含 {len(secs)} 个 section，序号顺序无法确认，"
+                        f"单独下载时不加序号前缀")
     else:
         out("KIND", "pages" if npages > 1 else "single")
 
