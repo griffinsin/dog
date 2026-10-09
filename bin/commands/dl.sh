@@ -7,60 +7,43 @@ source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 
 # ───────────────────────── 给维护者 ─────────────────────────
 #
-# 复用 lib/dl/vendor/m3u8_to_mp4.py（从 ~/dev/scripts 逐字节复制，不要在这里改；
-# 要改去 ~/dev/scripts 改完 cmp 对一遍再同步）。它用 ffmpeg -c copy 下 HLS，
-# 自带 referer/origin 推导、cookie、headers 脱敏。本命令只做三件 vendor 没做好的事：
+# m3u8 下载的核心就是 ffmpeg 一行：ffmpeg -c copy -i <url> out.mp4。ffmpeg 自己
+# 处理 HLS，没有签名/合并/风控那些难点，所以这里直接调 ffmpeg，不像 bili 那样
+# 需要 vendor 脚本。（初版曾复制 m3u8_to_mp4.py 进来当中间商，纯属多余，还因
+# .gitignore 的 vendor/ 规则漏打包出过残包，已撤。）
 #
-# 【命名】vendor 默认从 URL 末段取名，而 m3u8 末段几乎都是 index/playlist/720p/
-#   一串 hash，没意义；且它的 sanitize 只认 ASCII，中文会变成一堆下划线。
-#   所以命名在这里定：末段有意义就用，否则用 m3u8_时间戳；--name 可指定（支持中文，
-#   因为直接当 vendor 的 -o 传进去，不走它的 sanitize）。算好的完整路径用 -o 交给 vendor。
+# ffmpeg 行为照搬自那份脚本，保持一致：
+#   -n 不覆盖；-headers 用 CRLF 拼 Referer/Origin/Cookie；-c copy -bsf:a aac_adtstoasc。
 #
-# 【剪贴板】m3u8 链接长、几乎必带 ?token=，手敲加引号很烦；? 和 & 又是 shell 在
-#   把参数交给 dog 前就处理掉的（bili 里踩过）。所以不带 URL 时从剪贴板读，展示确认。
+# 【文件名全自动】用户不用输。m3u8 末段几乎都是 index/playlist/720p/hash，没意义，
+#   这种就用 m3u8_年月日_时分秒.mp4（可排序、不重名）；少数末段像样的就用末段。
+#   想自定义才用 --name（支持中文）。
 #
-# 【定位 lib/dl】brew 装完布局少一层 bin/，不能数 dirname 层数（bili 里踩过），
-#   在两个候选位置里挑真正含 vendor 脚本的那个。
+# 【剪贴板】m3u8 链接长、几乎必带 ?token=，而 ? 和 & 是 shell 在把参数交给 dog 前
+#   就处理掉的（bili 里踩过）。不带 URL 时从剪贴板读并展示确认。
 #
-# 【中文输出用 ${var}】bash 3.2 在 UTF-8 locale 下裸 $var 紧跟多字节会吞字，见 globals.sh。
-
-_dl_cmd_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DL_LIB=""
-for _cand in "$_dl_cmd_dir/../lib/dl" "$_dl_cmd_dir/../../lib/dl"; do
-    if [ -f "$_cand/vendor/m3u8_to_mp4.py" ]; then
-        DL_LIB="$(cd "$_cand" && pwd)"
-        break
-    fi
-done
-if [ -z "$DL_LIB" ]; then
-    dog_error "找不到 lib/dl（已查 $_dl_cmd_dir 的上一级和上两级）"
-    dog_error "若是 brew 安装，试 dog upgrade 重装"
-    exit 1
-fi
-M3U8="$DL_LIB/vendor/m3u8_to_mp4.py"
+# 【中文输出用 ${var}】bash 3.2 UTF-8 locale 下裸 $var 紧跟多字节会吞字，见 globals.sh。
 
 usage() {
     cat <<'HELP'
-dog dl —— 下载 m3u8(HLS) 视频为 mp4
+dog dl —— 下载 m3u8(HLS) 视频为 mp4（文件名自动，不用你操心）
 
 用法
-  dog dl                          从剪贴板读 m3u8 链接（推荐，省得给长链接加引号）
-  dog dl <m3u8链接> [选项]
-  dog dl -n <m3u8链接>            只打印将执行的 ffmpeg 命令，不下载
+  dog dl                          从剪贴板读 m3u8 链接（推荐）
+  dog dl <m3u8链接>
+  dog dl <m3u8链接> --referer <网页地址>    有防盗链时带上
 
 选项
+  --referer <url>  设置 Referer（很多 m3u8 有防盗链，报 403 就加这个）
   -o <目录>        输出目录，默认当前目录
-  --name <文件名>   指定输出文件名（可含中文；默认从链接推导，推不出用时间戳）
-  --referer <url>  设置 Referer（很多 m3u8 有防盗链，必须带）
+  --name <文件名>   自定义文件名（默认自动，可含中文）
   --cookies <文件>  Netscape cookie 文件
-  -n               dry-run，只打印 ffmpeg 命令
+  -n               dry-run，只打印将执行的 ffmpeg 命令
   -h, --help       显示本帮助
 
 说明
-  直接给链接时带 ? 或 & 要加引号：dog dl 'https://x/i.m3u8?token=abc'
-  从剪贴板读则不用管引号。
-  文件名：链接末段是 index/playlist/分辨率/hash 这类无意义的，会自动用
-  m3u8_年月日_时分秒.mp4；想要有意义的名字用 --name。
+  文件名默认自动：链接里推不出有意义的名字就用 m3u8_年月日_时分秒.mp4。
+  直接给链接时带 ? 或 & 要加引号；从剪贴板读则不用管。
 HELP
 }
 
@@ -97,10 +80,7 @@ if [ -z "$url" ] && command -v pbpaste >/dev/null 2>&1; then
         print_color "$CYAN" "  ${clip}"
         printf "使用这个链接？[回车=是 / n=手动输入]: "
         read -r _ans
-        case "$_ans" in
-            [Nn]*) ;;
-            *) url="$clip" ;;
-        esac
+        case "$_ans" in [Nn]*) ;; *) url="$clip" ;; esac
     else
         dog_log "剪贴板里没有 m3u8 链接"
     fi
@@ -123,13 +103,9 @@ if ! command -v ffmpeg >/dev/null 2>&1; then
     exit 1
 fi
 
-# ── 决定文件名 ──────────────────────────────────────────────
-# 末段（去 query、去 .m3u8）无意义时用时间戳。无意义 = 空 / 常见占位词 /
-# 纯分辨率(720p) / 像 hash(全 hex 且较长)。
+# ── 文件名全自动 ────────────────────────────────────────────
 if [ -z "$name" ]; then
-    base="${url%%\?*}"      # 去掉 ?query
-    base="${base##*/}"      # 取末段
-    base="${base%.m3u8}"    # 去扩展名
+    base="${url%%\?*}"; base="${base##*/}"; base="${base%.m3u8}"
     meaningless=0
     case "$(printf '%s' "$base" | tr 'A-Z' 'a-z')" in
         ''|index|playlist|master|main|media|video|stream|chunklist|out|output|hls|live)
@@ -139,7 +115,6 @@ if [ -z "$name" ]; then
     printf '%s' "$base" | grep -qiE '^[0-9a-f]{12,}$' && meaningless=1   # 长 hex hash
     if [ "$meaningless" -eq 1 ]; then
         name="m3u8_$(date +%Y%m%d_%H%M%S)"
-        [ "$dry_run" = false ] && dog_log "链接末段无有意义名字，用时间戳命名（--name 可自定）"
     else
         name="$base"
     fi
@@ -147,15 +122,33 @@ fi
 name="${name%.mp4}.mp4"
 dest="${outdir%/}/${name}"
 
-# ── 组装并调用 vendor ───────────────────────────────────────
-cmd=(python3 "$M3U8" "$url" -o "$dest")
-[ -n "$referer" ] && cmd+=(--referer "$referer")
-[ -n "$cookies" ] && cmd+=(--cookie-file "$cookies")
+# ── 组装 ffmpeg（照搬 m3u8_to_mp4.py 的行为）────────────────
+# Origin 从 Referer 推导：scheme://host，用 bash 参数展开，不碰 sed 方言
+origin=""
+if [ -n "$referer" ]; then
+    _rest="${referer#*://}"
+    origin="${referer%%://*}://${_rest%%/*}"
+fi
+
+# Netscape cookie 文件 -> "name=value; name2=value2"
+cookie=""
+if [ -n "$cookies" ] && [ -f "$cookies" ]; then
+    cookie=$(awk -F'\t' '!/^#/ && NF>=7 {printf "%s=%s; ", $6, $7}' "$cookies" | sed 's/; $//')
+fi
+
+# -headers 需要 CRLF 分隔、整体一个参数
+hdr=""
+[ -n "$referer" ] && hdr="${hdr}Referer: ${referer}"$'\r\n'
+[ -n "$origin" ]  && hdr="${hdr}Origin: ${origin}"$'\r\n'
+[ -n "$cookie" ]  && hdr="${hdr}Cookie: ${cookie}"$'\r\n'
+
+ff=(ffmpeg -n -hide_banner -loglevel warning -stats)
+[ -n "$hdr" ] && ff+=(-headers "$hdr")
+ff+=(-i "$url" -c copy -bsf:a aac_adtstoasc "$dest")
 
 if [ "$dry_run" = true ]; then
-    # 逐参数转义，这样打印出来的命令能直接复制运行（URL 的 ?& 不会被 shell 截断）
     _show=""
-    for _a in "${cmd[@]}"; do _show="$_show $(printf '%q' "$_a")"; done
+    for _a in "${ff[@]}"; do _show="$_show $(printf '%q' "$_a")"; done
     echo "将执行:${_show}"
     echo "输出到: ${dest}"
     exit 0
@@ -172,7 +165,7 @@ dog_log "下载: ${url}"
 dog_log "输出: ${dest}"
 echo
 
-if "${cmd[@]}"; then
+if "${ff[@]}"; then
     echo
     if [ -f "$dest" ]; then
         dog_success "完成 -> ${dest}  ($(du -h "$dest" 2>/dev/null | cut -f1 | tr -d ' '))"
@@ -182,6 +175,6 @@ if "${cmd[@]}"; then
 else
     rc=$?
     dog_error "下载失败（退出码 ${rc}）"
-    dog_log "若是防盗链（403/拿不到流），多半要带 --referer（视频所在网页地址）"
+    dog_log "若报 403 / 拿不到流，多半是防盗链，加 --referer <视频所在网页地址> 再试"
     exit "$rc"
 fi
