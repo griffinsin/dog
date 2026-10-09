@@ -493,22 +493,39 @@ if [ -n "$flat" ] && [ -e "$flat" ]; then
     exit 0
 fi
 
-# 用时间戳标记而不是前后快照对比：已存在被 bili_dl 跳过的文件 mtime 是旧的，
-# 天然不会被误判成本次产物。find -newer 是 POSIX，不依赖 GNU 扩展。
-marker=""
-if [ -n "$flat" ]; then
-    mkdir -p "$outdir"
-    marker="$outdir/.dog_bili_marker.$$"
-    : > "$marker"
-fi
+# ── 执行下载，一轮完后若有失败项，列出并询问是否重试 ────────────
+#
+# vendor 三个脚本有个根因：下载失败只是 fail+=1 后打印汇总，不返回非 0 退出码，
+# 所以 bash 侧单看退出码永远是“成功”。这里改为从输出取权威失败数，并修掉退出码。
+#
+# 失败数取自输出最后一行「完成: …失败 N…」：分P 场景它是唯一一行；合集场景
+# 最后一行是 bili_season 的视频级汇总（各视频内部的 bili_dl 汇总行在它之前）。
+# 这是解析，但只用于“判断有无失败 / 展示”——重试的正确性不依赖它：
+# 重试就是重跑同一条命令，vendor 的「文件已存在就跳过」保证只会重下没成功的。
+#
+# 不改 vendor：精确的失败清单得改 vendor 才拿得到，而 vendor 是逐字节快照。
+# 所以失败项列表是“尽力解析、仅供参考”，可靠的是失败数和重跑语义。
 
-dog_log "执行: ${cmd[*]}"
-echo
-"${cmd[@]}"
-rc=$?
+# 执行一轮下载。设置全局 ROUND_RC / ROUND_FAIL / ROUND_FAILED_LIST。
+download_round() {
+    local logf marker produced count
+    logf=$(mktemp "${TMPDIR:-/tmp}/dog_bili_run.XXXXXX")
 
-if [ -n "$marker" ]; then
-    if [ $rc -eq 0 ]; then
+    # 单个完整视频下完改名：每轮重建 marker（用 find -newer 认本轮新产出的文件）
+    marker=""
+    if [ -n "$flat" ]; then
+        mkdir -p "$outdir"
+        marker="$outdir/.dog_bili_marker.$$"
+        : > "$marker"
+    fi
+
+    # </dev/null 防下载链里的 ffmpeg 之类吞掉终端 stdin，保护之后的重试询问 read
+    # （recv 里踩过 adb 吞 stdin 的坑）；2>&1 | tee 实时显示 + 落盘供解析；
+    # PIPESTATUS[0] 才是下载器退出码。
+    "${cmd[@]}" </dev/null 2>&1 | tee "$logf"
+    ROUND_RC=${PIPESTATUS[0]}
+
+    if [ -n "$marker" ] && [ "$ROUND_RC" -eq 0 ]; then
         produced=$(find "$outdir" -maxdepth 1 -type f -name '*.mp4' -newer "$marker" 2>/dev/null)
         count=$(printf '%s' "$produced" | grep -c . )
         if [ "$count" = "1" ] && [ "$produced" != "$flat" ]; then
@@ -519,12 +536,64 @@ if [ -n "$marker" ]; then
             fi
         fi
     fi
-    rm -f "$marker"
+    [ -n "$marker" ] && rm -f "$marker"
+
+    ROUND_FAIL=$(tr -d '\r' < "$logf" | grep '^完成:' | tail -1 | sed -n 's/.*失败 \([0-9][0-9]*\).*/\1/p')
+    [ -z "$ROUND_FAIL" ] && ROUND_FAIL=0
+
+    # 失败项列表（仅供参考）：把「x 失败」行和它上面最近的「[i/n] …」标题配对。
+    # vendor 里换镜像/预热的提示是「! …失败」（叹号），用行首 x 区分，不混入。
+    ROUND_FAILED_LIST=$(tr -d '\r' < "$logf" | awk '
+        /^\[[0-9]+\/[0-9]+\]/ { ctx=$0; next }
+        /^[[:space:]]*x 失败/ { if (ctx != "") print "    • " ctx }')
+
+    rm -f "$logf"
+}
+
+dog_log "执行: ${cmd[*]}"
+echo
+download_round
+
+retry_n=0
+while [ "${ROUND_FAIL:-0}" -gt 0 ] || [ "${ROUND_RC:-0}" -eq 130 ]; do
+    echo
+    [ "$ROUND_RC" -eq 130 ] && dog_error "下载被中断"
+    dog_error "本轮有 ${ROUND_FAIL} 项下载失败"
+    if [ -n "$ROUND_FAILED_LIST" ]; then
+        dog_log "失败项（参考）:"
+        printf '%s\n' "$ROUND_FAILED_LIST"
+    fi
+
+    prev_fail="$ROUND_FAIL"
+
+    if [ "$assume_yes" = true ]; then
+        retry_n=$((retry_n + 1))
+        if [ "$retry_n" -gt 3 ]; then
+            dog_error "已自动重试 3 轮仍有失败，停止（-y）"
+            break
+        fi
+        dog_log "自动重试第 ${retry_n} 轮..."
+    else
+        printf "重试全部失败项？已成功的会自动跳过 [Y/n]: "
+        read -r _ans
+        case "$_ans" in [Nn]*) dog_log "不再重试"; break ;; esac
+    fi
+
+    echo
+    download_round
+
+    # 防呆：重试后失败数没减少，说明不是重跑能解决的（需登录的画质、视频已删等），
+    # 停止，免得交互模式下用户一直选 Y 却毫无进展。中断(130)不算，那是用户主动。
+    if [ "$ROUND_RC" -ne 130 ] && [ "${ROUND_FAIL:-0}" -ge "$prev_fail" ]; then
+        dog_error "重试后失败数未减少（${prev_fail} -> ${ROUND_FAIL}），可能需要登录或视频已不可用，停止重试"
+        break
+    fi
+done
+
+if [ "${ROUND_FAIL:-0}" -eq 0 ] && [ "${ROUND_RC:-0}" -eq 0 ]; then
+    dog_success "完成 -> $(cd "$outdir" 2>/dev/null && pwd || echo "$outdir")"
+    exit 0
 fi
 
-if [ $rc -eq 0 ]; then
-    dog_success "完成 -> $(cd "$outdir" 2>/dev/null && pwd || echo "$outdir")"
-else
-    dog_error "下载失败（退出码 ${rc}）"
-fi
-exit $rc
+dog_error "仍有 ${ROUND_FAIL:-?} 项失败 -> $(cd "$outdir" 2>/dev/null && pwd || echo "$outdir")"
+exit 1
