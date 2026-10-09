@@ -26,7 +26,10 @@ Desktop.ini
 
 # 依赖目录
 node_modules/
-vendor/
+# 注意：不要在这里加 vendor/。本项目 lib/*/vendor/ 是要提交的外部脚本快照
+# （从 ~/dev/scripts 逐字节复制），通配 vendor/ 会把它们 ignore，导致 git archive
+# 打包时漏掉、brew 装出缺文件的残包。lib/bili/vendor 早先靠 git mv 侥幸绕过，
+# lib/dl/vendor 新建时就被坑了（1.0.85 装出来找不到 vendor 脚本）。
 
 # 其他
 *.bak
