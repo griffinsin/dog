@@ -22,7 +22,7 @@
 """
 
 import argparse, hashlib, http.cookiejar, json, os, re, sys, time
-import urllib.parse, urllib.request
+import urllib.error, urllib.parse, urllib.request
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36")
@@ -47,16 +47,31 @@ class Space:
         self.logged_in = any(c.name == "SESSDATA" for c in self.jar)
         self.keys = None
 
-    def _raw(self, url, referer=None, as_json=True):
-        req = urllib.request.Request(url, headers={
+    def _raw(self, url, referer=None, as_json=True, retries=4):
+        # 网络抖动/读超时会重试（海外访问常见，否则一次 TimeoutError 整个脚本就
+        # traceback 崩溃，连合集列表都取不到）。但服务端明确拒绝（HTTPError，如
+        # 412）不重试——重试无益还可能加重风控；业务层的 -352 风控走正常返回、
+        # 由调用方处理，不在这里硬重试（见 BILIBILI-NOTES.md 第一节）。
+        headers = {
             "User-Agent": UA,
             "Referer": referer or "https://www.bilibili.com/",
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "zh-CN,zh;q=0.9",
-        })
-        with self.opener.open(req, timeout=30) as r:
-            body = r.read().decode(errors="replace")
-        return json.loads(body) if as_json else body
+        }
+        last = None
+        for attempt in range(retries):
+            try:
+                req = urllib.request.Request(url, headers=headers)
+                with self.opener.open(req, timeout=60) as r:
+                    body = r.read().decode(errors="replace")
+                return json.loads(body) if as_json else body
+            except urllib.error.HTTPError:
+                raise
+            except OSError as e:          # 超时/连接断等网络错误，可重试
+                last = e
+                if attempt < retries - 1:
+                    time.sleep(2 ** attempt)
+        raise last
 
     def warmup(self):
         """先访问首页拿 buvid3/b_nut，否则接口直接 412。"""

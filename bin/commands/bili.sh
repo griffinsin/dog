@@ -590,10 +590,20 @@ while [ "${ROUND_FAIL:-0}" -gt 0 ] || [ "${ROUND_RC:-0}" -eq 130 ]; do
     fi
 done
 
+_where="$(cd "$outdir" 2>/dev/null && pwd || echo "$outdir")"
 if [ "${ROUND_FAIL:-0}" -eq 0 ] && [ "${ROUND_RC:-0}" -eq 0 ]; then
-    dog_success "完成 -> $(cd "$outdir" 2>/dev/null && pwd || echo "$outdir")"
+    dog_success "完成 -> ${_where}"
     exit 0
 fi
 
-dog_error "仍有 ${ROUND_FAIL:-?} 项失败 -> $(cd "$outdir" 2>/dev/null && pwd || echo "$outdir")"
+# 区分三种非成功：有失败项 / 被中断 / 下载器异常崩溃（如网络超时 traceback）。
+# 崩溃时没有“完成:…失败 N”汇总行，ROUND_FAIL 解析不到当 0，但退出码非 0——
+# 不能笼统报“仍有 0 项失败”（自相矛盾），要如实说是异常退出。
+if [ "${ROUND_FAIL:-0}" -gt 0 ]; then
+    dog_error "仍有 ${ROUND_FAIL} 项失败 -> ${_where}"
+elif [ "${ROUND_RC:-0}" -eq 130 ]; then
+    dog_error "已中断 -> ${_where}"
+else
+    dog_error "下载器异常退出（退出码 ${ROUND_RC:-?}），多为网络超时等，重跑即可 -> ${_where}"
+fi
 exit 1
