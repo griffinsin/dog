@@ -181,13 +181,30 @@ def human(n):
         n /= 1024
 
 
-def download(http_client, urls, dest, referer, label):
-    """带断点续传的下载；urls 为镜像列表，逐个尝试。"""
-    part = dest + ".part"
-    have = os.path.getsize(part) if os.path.exists(part) else 0
-    last_err = None
+def download(http_client, urls, dest, referer, label, max_rounds=40, max_stall=6):
+    """带断点续传的下载，多轮重试。
 
-    for url in urls:
+    B 站的流 CDN（尤其 PCDN）对顺序下载常限流/断连：一个连接只给几 MB 就断，
+    备镜像有时还直接拒连。旧实现把镜像列表只遍历一遍、每个失败就换下一个、
+    列表走完就彻底放弃，所以这种 CDN 下很容易整段失败；更隐蔽的是，当某次
+    续传恰好把字节数凑够、但中途换的镜像内容和前半段不一致时，字节数检查
+    （done<total）发现不了，就会得到能播放却“有声无画/黑屏”的坏视频流。
+
+    改为多轮续传：反复用 Range 从断点往下续，**优先坚持同一个镜像**
+    （减少跨镜像拼接导致的内容错位），只有当某镜像这一轮一个字节都没拿到时
+    才换下一个；连续 max_stall 轮毫无进展才放弃。最后以字节数是否达到
+    Content-Length 作为完成判据。"""
+    part = dest + ".part"
+    total = None
+    mirror = 0
+    stall = 0  # 连续“没拿到任何新字节”的轮数
+
+    for _ in range(max_rounds):
+        have = os.path.getsize(part) if os.path.exists(part) else 0
+        if total is not None and have >= total:
+            break
+
+        url = urls[mirror % len(urls)]
         try:
             extra = {"Origin": "https://www.bilibili.com"}
             if have:
@@ -195,13 +212,13 @@ def download(http_client, urls, dest, referer, label):
             try:
                 resp = http_client.open(url, referer, extra)
             except urllib.error.HTTPError as e:
-                if e.code == 416 and have:      # 已经下完了
-                    os.replace(part, dest)
-                    return
+                if e.code == 416 and have:      # Range 越界 = 已经下完
+                    total = have
+                    break
                 raise
 
             with resp:
-                # 服务端忽略 Range 时要从头写，否则文件会拼错
+                # 服务端忽略 Range（返回 200）时要从头写，否则文件会拼错
                 if have and resp.status != 206:
                     have = 0
                     mode = "wb"
@@ -225,16 +242,22 @@ def download(http_client, urls, dest, referer, label):
                                   f"{human(done)}/{human(total)}  {speed}   ",
                                   end="", file=sys.stderr)
                 print(file=sys.stderr)
-
-            if total and done < total:
-                raise RuntimeError(f"下载不完整 {done}/{total}")
-            os.replace(part, dest)
-            return
         except Exception as e:
-            last_err = e
-            have = os.path.getsize(part) if os.path.exists(part) else 0
-            print(f"\n    ! 镜像失败({e})，换下一个", file=sys.stderr)
-    raise RuntimeError(f"{label} 下载失败: {last_err}")
+            print(f"\n    ! 续传中断({e})，重试", file=sys.stderr)
+
+        got = (os.path.getsize(part) if os.path.exists(part) else 0) - have
+        if got > 0:
+            stall = 0            # 有进展，继续坚持这个镜像
+        else:
+            stall += 1
+            mirror += 1          # 这个镜像不给字节，换下一个
+            if stall >= max_stall:
+                break
+
+    final = os.path.getsize(part) if os.path.exists(part) else 0
+    if total is None or final < total:
+        raise RuntimeError(f"{label} 下载失败/不完整: {final}/{total}")
+    os.replace(part, dest)
 
 
 def done_rate(delta, t0):
@@ -247,6 +270,19 @@ def merge(ffmpeg, video, audio, out):
            "-i", video, "-i", audio,
            "-c", "copy", "-movflags", "+faststart", out]
     subprocess.run(cmd, check=True)
+
+
+def verify_stream(ffmpeg, path):
+    """解码校验流完整性：返回 True 表示没问题。
+
+    PCDN（cosov 等）偶尔会返回字节数对、但 H.264 内容损坏的数据，下出来的
+    视频能播却黑屏（有声无画）——光比字节数发现不了（字节数、时长都正常）。
+    这里真解一遍码，数 ffmpeg 报的错误行数：容忍开头个别警告（DASH 分片开头
+    常有 1~2 条），超过阈值就判损坏。宁可判失败重下，也不要把黑屏文件当成功。"""
+    r = subprocess.run([ffmpeg, "-v", "error", "-i", path, "-f", "null", "-"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    errs = [ln for ln in r.stderr.decode("utf-8", "replace").splitlines() if ln.strip()]
+    return len(errs) <= 3
 
 
 # ---------------------------------------------------------------- 主流程
@@ -339,6 +375,9 @@ def main():
             vtmp = os.path.join(args.outdir, name + ".video.m4s")
             atmp = os.path.join(args.outdir, name + ".audio.m4s")
             download(http_client, stream_urls(video), vtmp, referer, "视频")
+            if not verify_stream(ffmpeg, vtmp):
+                raise RuntimeError("视频流解码校验未通过（花屏/黑屏），判为失败；"
+                                   "重下有机会换到更好的节点")
             download(http_client, stream_urls(audio), atmp, referer, "音频")
 
             merge(ffmpeg, vtmp, atmp, final)
