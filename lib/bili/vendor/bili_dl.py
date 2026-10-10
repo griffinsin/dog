@@ -181,29 +181,19 @@ def human(n):
         n /= 1024
 
 
-def download(http_client, urls, dest, referer, label, max_rounds=40, max_stall=6):
-    """带断点续传的下载，多轮重试。
-
-    B 站的流 CDN（尤其 PCDN）对顺序下载常限流/断连：一个连接只给几 MB 就断，
-    备镜像有时还直接拒连。旧实现把镜像列表只遍历一遍、每个失败就换下一个、
-    列表走完就彻底放弃，所以这种 CDN 下很容易整段失败；更隐蔽的是，当某次
-    续传恰好把字节数凑够、但中途换的镜像内容和前半段不一致时，字节数检查
-    （done<total）发现不了，就会得到能播放却“有声无画/黑屏”的坏视频流。
-
-    改为多轮续传：反复用 Range 从断点往下续，**优先坚持同一个镜像**
-    （减少跨镜像拼接导致的内容错位），只有当某镜像这一轮一个字节都没拿到时
-    才换下一个；连续 max_stall 轮毫无进展才放弃。最后以字节数是否达到
-    Content-Length 作为完成判据。"""
-    part = dest + ".part"
+def _fetch_to_part(http_client, urls, part, referer, label, start_mirror,
+                   max_rounds=40, max_stall=6):
+    """多轮续传把 urls（镜像列表）下到 part，返回 (字节是否凑齐, total)。
+    反复用 Range 从断点往下续，优先坚持同一个镜像（减少跨镜像拼接错位），
+    某镜像这一轮一个字节都没拿到才换下一个，连续 max_stall 轮毫无进展才停。
+    B 站流 CDN（尤其 PCDN）常限流/断连——一个连接只给几 MB 就断，靠多轮续传凑齐。"""
     total = None
-    mirror = 0
-    stall = 0  # 连续“没拿到任何新字节”的轮数
-
+    mirror = start_mirror
+    stall = 0
     for _ in range(max_rounds):
         have = os.path.getsize(part) if os.path.exists(part) else 0
         if total is not None and have >= total:
             break
-
         url = urls[mirror % len(urls)]
         try:
             extra = {"Origin": "https://www.bilibili.com"}
@@ -216,7 +206,6 @@ def download(http_client, urls, dest, referer, label, max_rounds=40, max_stall=6
                     total = have
                     break
                 raise
-
             with resp:
                 # 服务端忽略 Range（返回 200）时要从头写，否则文件会拼错
                 if have and resp.status != 206:
@@ -224,7 +213,6 @@ def download(http_client, urls, dest, referer, label, max_rounds=40, max_stall=6
                     mode = "wb"
                 else:
                     mode = "ab" if have else "wb"
-
                 total = have + int(resp.headers.get("Content-Length") or 0)
                 done = have
                 t0 = time.time()
@@ -244,7 +232,6 @@ def download(http_client, urls, dest, referer, label, max_rounds=40, max_stall=6
                 print(file=sys.stderr)
         except Exception as e:
             print(f"\n    ! 续传中断({e})，重试", file=sys.stderr)
-
         got = (os.path.getsize(part) if os.path.exists(part) else 0) - have
         if got > 0:
             stall = 0            # 有进展，继续坚持这个镜像
@@ -253,11 +240,38 @@ def download(http_client, urls, dest, referer, label, max_rounds=40, max_stall=6
             mirror += 1          # 这个镜像不给字节，换下一个
             if stall >= max_stall:
                 break
-
     final = os.path.getsize(part) if os.path.exists(part) else 0
-    if total is None or final < total:
-        raise RuntimeError(f"{label} 下载失败/不完整: {final}/{total}")
-    os.replace(part, dest)
+    return (total is not None and final >= total), total
+
+
+def download(http_client, urls, dest, referer, label, validate=None, max_attempts=4):
+    """下载一路流：多轮续传 + 可选内容校验，坏了换镜像重下。
+
+    海外访问下 B 站 CDN（PCDN 更甚）经常返回“字节数、时长都正常、但 H.264
+    内容损坏”的数据，下出来能播却黑屏（有声无画），字节数检查发现不了。
+    所以传 validate 真解一遍码来判：
+      - 字节没凑齐（限流下不动）→ 保留 part、换起始镜像再续；
+      - 字节齐但 validate 判损坏 → 删掉从头、换镜像整段重下。
+    每次 attempt 换一个起始镜像轮着来，多试几次命中好数据的概率大增，比
+    “整段失败后靠外层重跑同一顺序”有效得多。"""
+    part = dest + ".part"
+    for attempt in range(max_attempts):
+        ok, _ = _fetch_to_part(http_client, urls, part, referer, label,
+                               start_mirror=attempt)
+        if not ok:
+            if attempt < max_attempts - 1:
+                print(f"\n    ! {label} 字节未凑齐，换镜像重试", file=sys.stderr)
+                continue
+            raise RuntimeError(f"{label} 下载失败/不完整")
+        os.replace(part, dest)
+        if validate is None or validate(dest):
+            return
+        # 字节齐但内容损坏：删掉从头、换镜像重下
+        print(f"\n    ! {label} 解码校验未过（花屏/黑屏），换镜像重下", file=sys.stderr)
+        for p in (dest, part):
+            if os.path.exists(p):
+                os.remove(p)
+    raise RuntimeError(f"{label} 多次重下校验仍未通过（花屏/黑屏）")
 
 
 def done_rate(delta, t0):
@@ -374,10 +388,8 @@ def main():
 
             vtmp = os.path.join(args.outdir, name + ".video.m4s")
             atmp = os.path.join(args.outdir, name + ".audio.m4s")
-            download(http_client, stream_urls(video), vtmp, referer, "视频")
-            if not verify_stream(ffmpeg, vtmp):
-                raise RuntimeError("视频流解码校验未通过（花屏/黑屏），判为失败；"
-                                   "重下有机会换到更好的节点")
+            download(http_client, stream_urls(video), vtmp, referer, "视频",
+                     validate=lambda p: verify_stream(ffmpeg, p))
             download(http_client, stream_urls(audio), atmp, referer, "音频")
 
             merge(ffmpeg, vtmp, atmp, final)
