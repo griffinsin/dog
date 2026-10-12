@@ -552,42 +552,78 @@ download_round() {
 
 dog_log "执行: ${cmd[*]}"
 echo
+
+# 整批下载的主循环，区分三种非成功情况：
+#   - 有失败项（校验失败等）：列出并询问/自动重试，带“未减少则停”的防呆；
+#   - 异常退出（网络瞬时断/DNS 失败等导致下载器 traceback 崩溃）：自动续传重跑，
+#     因为断点续传每次都往前推进，网络抖动多半重跑就过去了，不该逼用户手动再来；
+#   - 被中断（Ctrl+C）：停。
+# 几十集被尾部一次网络抖动掐断整批、逼人反复重试，是实测反复出现的痛点，这里自动化。
+retry_n=0          # 失败项重试轮数
+auto_resume=0      # 异常退出自动续传次数
+max_auto_resume=8
+
+# Ctrl+C 直接整体退出，不被 sleep 吞掉、也不陷在自动续传里
+trap 'echo; dog_error "已取消"; exit 130' INT
+
 download_round
-
-retry_n=0
-while [ "${ROUND_FAIL:-0}" -gt 0 ] || [ "${ROUND_RC:-0}" -eq 130 ]; do
-    echo
-    [ "$ROUND_RC" -eq 130 ] && dog_error "下载被中断"
-    dog_error "本轮有 ${ROUND_FAIL} 项下载失败"
-    if [ -n "$ROUND_FAILED_LIST" ]; then
-        dog_log "失败项（参考）:"
-        printf '%s\n' "$ROUND_FAILED_LIST"
-    fi
-
-    prev_fail="$ROUND_FAIL"
-
-    if [ "$assume_yes" = true ]; then
-        retry_n=$((retry_n + 1))
-        if [ "$retry_n" -gt 3 ]; then
-            dog_error "已自动重试 3 轮仍有失败，停止（-y）"
-            break
-        fi
-        dog_log "自动重试第 ${retry_n} 轮..."
-    else
-        printf "重试全部失败项？已成功的会自动跳过 [Y/n]: "
-        read -r _ans
-        case "$_ans" in [Nn]*) dog_log "不再重试"; break ;; esac
-    fi
-
-    echo
-    download_round
-
-    # 防呆：重试后失败数没减少，说明不是重跑能解决的（需登录的画质、视频已删等），
-    # 停止，免得交互模式下用户一直选 Y 却毫无进展。中断(130)不算，那是用户主动。
-    if [ "$ROUND_RC" -ne 130 ] && [ "${ROUND_FAIL:-0}" -ge "$prev_fail" ]; then
-        dog_error "重试后失败数未减少（${prev_fail} -> ${ROUND_FAIL}），可能需要登录或视频已不可用，停止重试"
+while :; do
+    # 成功
+    if [ "${ROUND_FAIL:-0}" -eq 0 ] && [ "${ROUND_RC:-0}" -eq 0 ]; then
         break
     fi
+
+    # 有失败项：列出 + 询问（-y 自动），重跑跳过已成功、只重下失败的
+    if [ "${ROUND_FAIL:-0}" -gt 0 ]; then
+        echo
+        dog_error "本轮有 ${ROUND_FAIL} 项下载失败"
+        if [ -n "$ROUND_FAILED_LIST" ]; then
+            dog_log "失败项（参考）:"
+            printf '%s\n' "$ROUND_FAILED_LIST"
+        fi
+        prev_fail="$ROUND_FAIL"
+        if [ "$assume_yes" = true ]; then
+            retry_n=$((retry_n + 1))
+            if [ "$retry_n" -gt 3 ]; then
+                dog_error "已自动重试 3 轮仍有失败，停止（-y）"
+                break
+            fi
+            dog_log "自动重试第 ${retry_n} 轮..."
+        else
+            printf "重试全部失败项？已成功的会自动跳过 [Y/n]: "
+            read -r _ans
+            case "$_ans" in [Nn]*) dog_log "不再重试"; break ;; esac
+        fi
+        echo
+        download_round
+        # 防呆：仅当这次是“正常完成但失败数没减少”才停（需登录/视频已删等重跑解决不了）。
+        # 若这次变成异常退出（网络崩），不算防呆，交给下面的自动续传分支。
+        if [ "${ROUND_RC:-0}" -eq 0 ] && [ "${ROUND_FAIL:-0}" -ge "$prev_fail" ]; then
+            dog_error "重试后失败数未减少（${prev_fail} -> ${ROUND_FAIL}），可能需要登录或视频已不可用，停止重试"
+            break
+        fi
+        continue
+    fi
+
+    # 被中断
+    if [ "${ROUND_RC:-0}" -eq 130 ]; then
+        echo
+        dog_error "下载被中断"
+        break
+    fi
+
+    # 异常退出（RC≠0 且无失败项）：网络瞬时断等，自动续传重跑
+    auto_resume=$((auto_resume + 1))
+    if [ "$auto_resume" -gt "$max_auto_resume" ]; then
+        echo
+        dog_error "已自动续传重跑 ${max_auto_resume} 次仍异常退出，网络可能持续不稳，暂停"
+        break
+    fi
+    _wait=$((auto_resume * 3))
+    echo
+    dog_log "下载器异常退出（多为网络瞬时断），${_wait}s 后自动续传重跑（第 ${auto_resume}/${max_auto_resume} 次，已下的会跳过）..."
+    sleep "$_wait"
+    download_round
 done
 
 _where="$(cd "$outdir" 2>/dev/null && pwd || echo "$outdir")"
@@ -595,15 +631,11 @@ if [ "${ROUND_FAIL:-0}" -eq 0 ] && [ "${ROUND_RC:-0}" -eq 0 ]; then
     dog_success "完成 -> ${_where}"
     exit 0
 fi
-
-# 区分三种非成功：有失败项 / 被中断 / 下载器异常崩溃（如网络超时 traceback）。
-# 崩溃时没有“完成:…失败 N”汇总行，ROUND_FAIL 解析不到当 0，但退出码非 0——
-# 不能笼统报“仍有 0 项失败”（自相矛盾），要如实说是异常退出。
 if [ "${ROUND_FAIL:-0}" -gt 0 ]; then
     dog_error "仍有 ${ROUND_FAIL} 项失败 -> ${_where}"
 elif [ "${ROUND_RC:-0}" -eq 130 ]; then
     dog_error "已中断 -> ${_where}"
 else
-    dog_error "下载器异常退出（退出码 ${ROUND_RC:-?}），多为网络超时等，重跑即可 -> ${_where}"
+    dog_error "下载器异常退出（退出码 ${ROUND_RC:-?}），已多次自动续传仍未成，重跑可继续 -> ${_where}"
 fi
 exit 1
