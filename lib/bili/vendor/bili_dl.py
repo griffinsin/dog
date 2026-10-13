@@ -244,35 +244,22 @@ def _fetch_to_part(http_client, urls, part, referer, label, start_mirror,
     return (total is not None and final >= total), total
 
 
-def download(http_client, urls, dest, referer, label, validate=None, max_attempts=4):
-    """下载一路流：多轮续传 + 可选内容校验，坏了换镜像重下。
+_mirror_rotate = 0   # 模块级：每次 download 轮换起始镜像，重试时自然换节点
 
-    海外访问下 B 站 CDN（PCDN 更甚）经常返回“字节数、时长都正常、但 H.264
-    内容损坏”的数据，下出来能播却黑屏（有声无画），字节数检查发现不了。
-    所以传 validate 真解一遍码来判：
-      - 字节没凑齐（限流下不动）→ 保留 part、换起始镜像再续；
-      - 字节齐但 validate 判损坏 → 删掉从头、换镜像整段重下。
-    每次 attempt 换一个起始镜像轮着来，多试几次命中好数据的概率大增，比
-    “整段失败后靠外层重跑同一顺序”有效得多。"""
+
+def download(http_client, urls, dest, referer, label):
+    """多轮续传把一路流下全（字节达到 Content-Length）。不在这里做内容校验——
+    内容是否损坏要在 merge 成最终 mp4 后整体校验（见 main）：裸 .m4s 分片用 ffmpeg
+    解码时对坏数据偏宽容、报错少（能骗过阈值），封装进 mp4 后错误才充分暴露。"""
+    global _mirror_rotate
     part = dest + ".part"
-    for attempt in range(max_attempts):
-        ok, _ = _fetch_to_part(http_client, urls, part, referer, label,
-                               start_mirror=attempt)
-        if not ok:
-            if attempt < max_attempts - 1:
-                print(f"\n    ! {label} 字节未凑齐，换镜像重试", file=sys.stderr)
-                continue
-            raise RuntimeError(f"{label} 下载失败/不完整")
-        os.replace(part, dest)
-        if validate is None or validate(dest):
-            return
-        # 字节齐但内容损坏：删掉从头、换镜像重下
-        print(f"\n    ! {label} 解码校验未过（花屏/黑屏），换镜像重下", file=sys.stderr)
-        for p in (dest, part):
-            if os.path.exists(p):
-                os.remove(p)
-    raise RuntimeError(f"{label} 多次重下校验仍未通过（花屏/黑屏）")
-
+    ok, total = _fetch_to_part(http_client, urls, part, referer, label,
+                               start_mirror=_mirror_rotate)
+    _mirror_rotate += 1
+    if not ok:
+        final = os.path.getsize(part) if os.path.exists(part) else 0
+        raise RuntimeError(f"{label} 下载失败/不完整: {final}/{total}")
+    os.replace(part, dest)
 
 def done_rate(delta, t0):
     el = time.time() - t0
@@ -388,11 +375,24 @@ def main():
 
             vtmp = os.path.join(args.outdir, name + ".video.m4s")
             atmp = os.path.join(args.outdir, name + ".audio.m4s")
-            download(http_client, stream_urls(video), vtmp, referer, "视频",
-                     validate=lambda p: verify_stream(ffmpeg, p))
-            download(http_client, stream_urls(audio), atmp, referer, "音频")
-
-            merge(ffmpeg, vtmp, atmp, final)
+            # 下 video+audio 合成最终 mp4，校验「最终 mp4」（而非 merge 前的 .m4s），
+            # 坏就换节点整段重来。PCDN 偶发返回字节够但 H.264 坏的数据，这种坏在裸
+            # .m4s 上常被 ffmpeg 宽容略过、封装进 mp4 才暴露，所以必须校验 mp4。
+            got_good = False
+            for _att in range(5):
+                download(http_client, stream_urls(video), vtmp, referer, "视频")
+                download(http_client, stream_urls(audio), atmp, referer, "音频")
+                merge(ffmpeg, vtmp, atmp, final)
+                if verify_stream(ffmpeg, final):
+                    got_good = True
+                    break
+                print(f"    ! 最终文件解码校验未过（花屏/黑屏），换节点重下整段"
+                      f"（第 {_att + 1}/5 次）", file=sys.stderr)
+                for t in (final, vtmp, atmp):
+                    if os.path.exists(t):
+                        os.remove(t)
+            if not got_good:
+                raise RuntimeError("多次重下校验仍未通过（花屏/黑屏）")
             if not args.keep:
                 for t in (vtmp, atmp):
                     os.path.exists(t) and os.remove(t)
