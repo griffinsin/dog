@@ -60,6 +60,7 @@ dog recv —— 从安卓手机取回文件或目录到电脑（send 的反方�
 说明
   直接给手机路径时，带空格的要加引号：dog recv '/sdcard/Download/a b.apk'
   交互模式按序号选，不存在这个问题。
+  取回成功后会自动在访达打开所在文件夹并高亮选中下载的文件。
 HELP
 }
 
@@ -311,6 +312,7 @@ pull_one() {
         else
             dog_success "-> ${dest}  ($(du -h "$dest" 2>/dev/null | cut -f1 | tr -d ' '))"
         fi
+        produced+=("$dest")   # 记下成功产物，结尾在访达选中它们
         return 0
     fi
     dog_error "取回失败: ${rp}"
@@ -321,6 +323,7 @@ dog_log "设备: ${selected_device}"
 echo
 
 ok=0; failed=0; skipped=0
+produced=()   # 成功取回的本地路径，结尾用 open -R 在访达高亮选中
 
 if [ "$interactive" = true ]; then
     base_dir="${remote_path%/}"
@@ -339,9 +342,20 @@ if [ "$interactive" = true ]; then
 else
     pull_one "$remote_path"
     case $? in
-        0) ;;
+        0) ok=1 ;;
         *) exit 1 ;;
     esac
+fi
+
+# 有文件真落地就在访达打开所在文件夹并高亮选中下载的文件（open -R）。
+# 只在有产物时触发：全失败/全跳过不弹窗。多个产物一起传给 open -R，同目录会
+# 同时选中；万一某些系统不支持多选 reveal，退回只打开输出目录。
+if [ "${#produced[@]}" -gt 0 ] && command -v open >/dev/null 2>&1; then
+    if open -R "${produced[@]}" 2>/dev/null; then
+        dog_log "已在访达打开并选中 ${#produced[@]} 个文件"
+    else
+        open "$outdir" 2>/dev/null && dog_log "已在访达打开: $(cd "$outdir" 2>/dev/null && pwd || echo "$outdir")"
+    fi
 fi
 
 [ "$failed" -gt 0 ] && exit 1
