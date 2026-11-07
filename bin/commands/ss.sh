@@ -12,12 +12,22 @@ source $(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/lib/globals.sh
 # 【设备发现】
 #   安卓：adb devices，取状态为 device 的序列号；型号用 getprop 补一下更好认。
 #   iPhone：xcrun devicectl list devices --json-output。注意这个列表是「本机配对过
-#     的全部设备」，含手表/iPad/没在跟前的手机/本机模拟器，不能直接用！必须按两条
-#     过滤：deviceType=="iPhone" 且 tunnelState=="connected"。实测里真机 USB 插上
-#     是 transport=wired/tunnel=connected，模拟器是 sameMachine/disconnected，不在
-#     场的是 None/unavailable —— 只有 connected 才真能截。tunnelState 是 JSON 里才
-#     可靠的字段，文本输出的 State 列对有线/网络都显示 available，不可靠，所以必须
-#     解析 JSON（devicectl 官方也只支持 --json-output 这一种脚本接口）。
+#     的全部设备」，含手表/iPad/没在跟前的手机/本机模拟器，不能直接用！
+#
+#     判断依据是 transportType，不是 tunnelState（曾经踩错，务必看清）：
+#       transportType=wired         USB 连着的真机         -> 列出
+#       transportType=localNetwork  配对过、走无线的真机     -> 默认不列，-w 才列（较慢）
+#       transportType=sameMachine   本机模拟器             -> 不列
+#       无此字段(None)/tunnel=unavailable  不在场          -> 不列
+#
+#     为什么不能用 tunnelState：它不是「设备是否在线」，而是一条「按需建立、闲置约
+#     30 秒自动断开」的连接状态。实测(Xcode 27，USB 连着的 iPhone)：平时 tunnel=
+#     disconnected；刚跑过 `devicectl device info/...` 后短暂变 connected；30 秒后
+#     又 disconnected。更要命的是本机模拟器(sameMachine)也可能是 tunnel=connected，
+#     用它过滤会把模拟器误当真机。capture screenshot 会自己按需建连，对
+#     tunnel=disconnected 的有线 iPhone 直接截屏照样成功（USB 下约 2.5 秒一张），
+#     根本不需要事先 connected。所以只认 transportType。
+#     （JSON 是 devicectl 官方唯一支持的脚本接口，故用 --json-output 解析。）
 #
 # 【只有一台真机就免选】两类合一个列表统一编号；总数==1 直接截，>1 才让用户选。
 #
@@ -37,6 +47,7 @@ dog ss —— 手机截屏到电脑（安卓 + iPhone 自动识别）
 
 用法
   dog ss                只连一台时直接截；多台时列出来让你选
+  dog ss -w             把无线连接的 iPhone 也列出来（较慢，默认只列 USB 有线）
   dog ss -s <设备ID>     指定设备：安卓序列号 或 iPhone 的 UDID/名称
   dog ss -h, --help     显示本帮助
 
@@ -44,6 +55,8 @@ dog ss —— 手机截屏到电脑（安卓 + iPhone 自动识别）
   存到 ~/Downloads/screenshot_年月日_时分秒.png（恒带时间戳，连拍不覆盖），
   截完在访达中定位选中。
   安卓走 adb，iPhone 走 Xcode 的 devicectl（截 iPhone 需 Xcode 27+）。
+  iPhone 默认只列 USB 有线连接的；无线配对的手机看不出此刻在不在附近、
+  且截一张要 14～30 秒，需要时加 -w 显式列出。
   只连一台设备时无需选择，直接截屏。
 HELP
 }
@@ -51,10 +64,12 @@ HELP
 output_dir="$HOME/Downloads"
 filename="screenshot"
 want_id=""
+include_wireless=false
 
 while [ $# -gt 0 ]; do
     case "$1" in
         -h|--help) usage; exit 0 ;;
+        -w) include_wireless=true; shift ;;
         -s)
             shift
             if [ -z "$1" ] || [[ "$1" == -* ]]; then
@@ -89,27 +104,36 @@ if command -v xcrun >/dev/null 2>&1 && [ -x /usr/bin/python3 ]; then
     if xcrun devicectl device capture screenshot --help >/dev/null 2>&1; then
         ios_supported=true
         ios_tmp=$(mktemp)
+        wflag=0; [ "$include_wireless" = true ] && wflag=1
         if xcrun devicectl list devices --json-output "$ios_tmp" >/dev/null 2>&1; then
-            while IFS=$'\t' read -r id name; do
+            while IFS=$'\t' read -r id name transport; do
                 [ -n "$id" ] || continue
+                disp="${name:-iPhone}"
+                [ "$transport" = "localNetwork" ] && disp="${disp}（无线，较慢）"
                 dev_platform+=("ios")
                 dev_id+=("$id")
-                dev_name+=("${name:-iPhone}")
-            done < <(/usr/bin/python3 - "$ios_tmp" <<'PY'
+                dev_name+=("$disp")
+            done < <(/usr/bin/python3 - "$ios_tmp" "$wflag" <<'PY'
 import json, sys
 try:
     data = json.load(open(sys.argv[1]))
 except Exception:
     sys.exit(0)
+include_wireless = (len(sys.argv) > 2 and sys.argv[2] == "1")
 for d in data.get("result", {}).get("devices", []):
     hw = d.get("hardwareProperties", {}) or {}
     cp = d.get("connectionProperties", {}) or {}
     dp = d.get("deviceProperties", {}) or {}
-    # 只认真机 iPhone 且当前隧道已连接（排除手表/iPad/模拟器/不在场设备）
-    if hw.get("deviceType") == "iPhone" and cp.get("tunnelState") == "connected":
+    # 按 transportType 判断能否截屏（不用 tunnelState，见顶部注释）：
+    #   wired=USB真机始终列出；localNetwork=无线真机仅 -w 时列出；
+    #   sameMachine=模拟器、None=不在场，一律排除。
+    if hw.get("deviceType") != "iPhone":
+        continue
+    tt = cp.get("transportType")
+    if tt == "wired" or (include_wireless and tt == "localNetwork"):
         ident = d.get("identifier") or ""
         name = dp.get("name") or "iPhone"
-        print(ident + "\t" + name)
+        print(ident + "\t" + name + "\t" + (tt or ""))
 PY
 )
         fi
@@ -185,8 +209,14 @@ if [ "$platform" = "android" ]; then
         exit 1
     fi
 else
-    if ! xcrun devicectl device capture screenshot -d "$device_id" --destination "$output_path" >/dev/null 2>&1; then
-        dog_error "iPhone 截屏失败：请确认手机已解锁、已点「信任此电脑」"
+    # stderr 留到变量里：锁屏时 devicectl 会报含 locked 的错，据此给更准的提示
+    cap_err=$(xcrun devicectl device capture screenshot -d "$device_id" --destination "$output_path" 2>&1 >/dev/null)
+    if [ $? -ne 0 ]; then
+        if printf '%s' "$cap_err" | grep -qi 'locked'; then
+            dog_error "手机处于锁屏状态，请解锁后重试"
+        else
+            dog_error "iPhone 截屏失败：请确认手机已解锁、已点「信任此电脑」"
+        fi
         exit 1
     fi
 fi
