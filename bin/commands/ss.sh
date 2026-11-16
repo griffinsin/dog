@@ -209,8 +209,56 @@ if [ "$platform" = "android" ]; then
         exit 1
     fi
 else
+    # 多屏机型(如 iPhone Duo 展开态)：默认截的是 primary 屏，而展开时 primary 往往
+    # 是灭着的那块 -> 截出全黑图却照样「成功」。按 backlightState 选「亮着」的屏，用其
+    # uniqueId 定位截取；全灭则不截黑图、直接提示点亮。实测用 backlightState(所有机型
+    # 都有，JSON 里是 off/activeOn/inactiveOn)判亮灭，用 uniqueId 定位非主屏。
+    disp_uid=""
+    if [ -x /usr/bin/python3 ]; then
+        disp_tmp=$(mktemp)
+        if xcrun devicectl device info displays -d "$device_id" --json-output "$disp_tmp" >/dev/null 2>&1; then
+            decision=$(/usr/bin/python3 - "$disp_tmp" <<'PY'
+import json, sys
+try:
+    data = json.load(open(sys.argv[1]))
+except Exception:
+    print("DEFAULT"); sys.exit(0)
+disp = (data.get("result", {}) or {}).get("displays", []) or []
+if not disp:
+    print("DEFAULT"); sys.exit(0)
+def lit(d):
+    bs = d.get("backlightState")
+    if bs is None:
+        return None                      # 未知，别据此判黑
+    return str(bs).lower() != "off"      # off=灭，activeOn/inactiveOn=亮
+prim = next((d for d in disp if d.get("primary")), None)
+if prim is not None and lit(prim) is not False:
+    print("DEFAULT"); sys.exit(0)        # 主屏亮或状态未知 -> 默认截(单屏走这条)
+for d in disp:                           # 主屏灭：挑一块亮且有 uniqueId 的屏
+    if lit(d) is True and d.get("uniqueId"):
+        print("ID\t" + str(d["uniqueId"])); sys.exit(0)
+if any(lit(d) is None for d in disp) or any(lit(d) is True for d in disp):
+    print("DEFAULT"); sys.exit(0)        # 有亮屏但无法定位，或状态未知 -> 尽力默认
+print("DARK")                            # 确认全灭
+PY
+)
+            case "$decision" in
+                DARK)
+                    rm -f "$disp_tmp"
+                    dog_error "屏幕处于熄灭状态，截图会是黑的，请先点亮/解锁屏幕后重试"
+                    exit 1 ;;
+                ID\ *|ID$'\t'*) disp_uid="${decision#*$'\t'}" ;;
+            esac
+        fi
+        rm -f "$disp_tmp"
+    fi
+
     # stderr 留到变量里：锁屏时 devicectl 会报含 locked 的错，据此给更准的提示
-    cap_err=$(xcrun devicectl device capture screenshot -d "$device_id" --destination "$output_path" 2>&1 >/dev/null)
+    if [ -n "$disp_uid" ]; then
+        cap_err=$(xcrun devicectl device capture screenshot -d "$device_id" --display-unique-id "$disp_uid" --destination "$output_path" 2>&1 >/dev/null)
+    else
+        cap_err=$(xcrun devicectl device capture screenshot -d "$device_id" --destination "$output_path" 2>&1 >/dev/null)
+    fi
     if [ $? -ne 0 ]; then
         if printf '%s' "$cap_err" | grep -qi 'locked'; then
             dog_error "手机处于锁屏状态，请解锁后重试"
@@ -219,6 +267,7 @@ else
         fi
         exit 1
     fi
+    [ -n "$disp_uid" ] && dog_log "多屏机型：已截取点亮的屏幕"
 fi
 
 # ── 校验产物并定位 ──
